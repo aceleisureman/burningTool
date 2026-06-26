@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+set -u
+
+if [ "$#" -gt 0 ]; then
+  cmd="claude $(printf '%q ' "$@")"
+else
+  cmd="${CLAUDE_RETRY_CMD:-claude}"
+fi
+initial_delay="${CLAUDE_RETRY_INITIAL_DELAY:-60}"
+failure_delay="${CLAUDE_RETRY_FAILURE_DELAY:-15}"
+max_delay="${CLAUDE_RETRY_MAX_DELAY:-300}"
+pattern="${CLAUDE_RETRY_PATTERN:-429|rate.?limit|Too Many Requests|Service Unavailable}"
+log_dir="${CLAUDE_RETRY_LOG_DIR:-$HOME/.claude-retry-console}"
+wrapper_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+shim_dir="$(CDPATH= cd -- "$wrapper_dir/../bin" 2>/dev/null && pwd || true)"
+
+if [ "$cmd" = "claude" ] || [[ "$cmd" == claude\ * ]]; then
+  real_claude="$(PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -v -x "$shim_dir" | paste -sd ':' -)" command -v claude || true)"
+  if [ -n "$real_claude" ]; then
+    cmd="$real_claude${cmd#claude}"
+  fi
+fi
+
+mkdir -p "$log_dir"
+
+delay="$initial_delay"
+attempt=1
+
+while true; do
+  log_file="$log_dir/claude-retry-$(date +%Y%m%d-%H%M%S)-attempt-${attempt}.log"
+  echo "[claude-retry] attempt=$attempt cmd=\"$cmd\" log=$log_file"
+
+  if command -v script >/dev/null 2>&1; then
+    script -q "$log_file" "$SHELL" -lc "$cmd"
+    status=$?
+  else
+    "$SHELL" -lc "$cmd" 2>&1 | tee "$log_file"
+    status=${PIPESTATUS[0]}
+  fi
+
+  if grep -Eiq "$pattern" "$log_file"; then
+    echo "[claude-retry] detected retryable 429/rate-limit output. retry in ${delay}s..."
+    sleep "$delay"
+    if [ "$delay" -lt "$max_delay" ]; then
+      delay=$(( delay * 2 ))
+      if [ "$delay" -gt "$max_delay" ]; then
+        delay="$max_delay"
+      fi
+    fi
+    attempt=$(( attempt + 1 ))
+    continue
+  fi
+
+  if [ "$status" -ne 0 ]; then
+    echo "[claude-retry] claude exited with $status. retry in ${failure_delay}s..."
+    sleep "$failure_delay"
+    attempt=$(( attempt + 1 ))
+    continue
+  fi
+
+  echo "[claude-retry] no retryable 429 output detected. exit=$status"
+  exit "$status"
+done

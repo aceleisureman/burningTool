@@ -1,0 +1,38 @@
+{
+  "name": "claude-console-retry",
+  "version": "0.1.0",
+  "description": "Run Claude Code in a monitored console and retry after 429/rate-limit exits.",
+  "author": {
+    "name": "Local",
+    "email": "local@example.com",
+    "url": "https://localhost"
+  },
+  "homepage": "https://localhost/claude-console-retry",
+  "repository": "https://localhost/claude-console-retry",
+  "license": "MIT",
+  "keywords": [
+    "claude",
+    "retry",
+    "console"
+  ],
+  "interface": {
+    "displayName": "Claude Console Retry",
+    "shortDescription": "Monitor Claude Code console output and retry on 429.",
+    "longDescription": "Provides a local wrapper script that runs Claude Code, watches console output for 429/rate-limit errors, and restarts with exponential backoff.",
+    "developerName": "Local",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Automation"
+    ],
+    "websiteURL": "https://localhost",
+    "privacyPolicyURL": "https://localhost/privacy",
+    "termsOfServiceURL": "https://localhost/terms",
+    "defaultPrompt": [
+      "Run Claude with retry monitoring.",
+      "Retry Claude Code after 429 errors.",
+      "Show me the latest retry log."
+    ],
+    "brandColor": "#2563EB"
+  }
+}

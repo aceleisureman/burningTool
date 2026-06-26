@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Downloaded/bundled toolchains (large binaries, not source)
+toolchain/
+resources/toolchain/
+
+# Runtime-generated command tools (busybox applets)
+tools/
+
+# Logs & temp
+*.log
+float-debug.txt
+*.tmp
+
+# OS / editor
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+
+# IDE
+.vscode/
+.idea/
