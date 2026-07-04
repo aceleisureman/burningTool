@@ -20,6 +20,13 @@ test('parseMakefileAsmSources reads multiline ASM_SOURCES entries', () => {
   assert.deepEqual(parseMakefileAsmSources(txt), ['startup_stm32f103xb.s', 'Core/Startup/extra.S']);
 });
 
+test('parseMakefileAsmSources reads ASOURCES entries from hand-written Makefiles', () => {
+  const txt = 'ASOURCES = Drivers/CMSIS/Device/ST/STM32F1xx/Source/Templates/gcc/startup_stm32f103xb.s\n';
+  assert.deepEqual(parseMakefileAsmSources(txt), [
+    'Drivers/CMSIS/Device/ST/STM32F1xx/Source/Templates/gcc/startup_stm32f103xb.s'
+  ]);
+});
+
 test('ensureMakefileStartupSources copies missing startup file from local GCC template', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bt-startup-'));
   try {

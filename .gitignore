@@ -5,11 +5,11 @@ node_modules/
 dist/
 
 # Downloaded/bundled toolchains (large binaries, not source)
-toolchain/
-resources/
+/toolchain/
+/resources/
 
 # Runtime-generated command tools (busybox applets)
-tools/
+/tools/
 
 # Logs & temp
 *.log

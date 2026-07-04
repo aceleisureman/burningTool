@@ -66,8 +66,8 @@ export function useSettings(deps) {
     const label = toolchainProfile.label || '当前平台';
     if (draft.toolchainMode !== 'default') return `${label} 当前使用自定义路径，不会自动下载工具链。`;
     const makeMode = toolchainProfile.defaultDownloads && toolchainProfile.defaultDownloads.make && toolchainProfile.defaultDownloads.make.mode;
-    if (makeMode === 'download') return '下载到软件根目录 toolchain/（ARM GCC + make + OpenOCD + 编译命令），并创建本地 pyOCD。';
-    return `${label} 默认下载 ARM GCC 到 toolchain/gcc/、OpenOCD 到 toolchain/openocd/，创建本地 pyOCD 到 toolchain/pyocd/；make 与 rm/mkdir/sh 等命令使用系统自带环境。`;
+    if (makeMode === 'download') return '下载到用户数据目录 toolchain/（ARM GCC + make + OpenOCD + 编译命令），并创建本地 pyOCD。';
+    return `${label} 默认下载 ARM GCC 到用户数据目录 toolchain/gcc/、OpenOCD 到 toolchain/openocd/，创建本地 pyOCD 到 toolchain/pyocd/；make 与 rm/mkdir/sh 等命令使用系统自带环境。`;
   });
 
   async function setFlashMethod(v) { config.flashMethod = v; try { Object.assign(config, await window.api.saveConfig({ flashMethod: v })); } catch (e) {} }
@@ -173,7 +173,7 @@ export function useSettings(deps) {
         ['状态', defaultTc.pyocdBin ? '本地已就绪' : '未安装'],
         ['版本', defaultTc.pyocdVersion || '未获取'],
         ['路径', defaultTc.pyocdBin || '未找到'],
-        ['来源', '项目根目录 toolchain/pyocd/']
+        ['来源', '用户数据目录 toolchain/pyocd/']
       ],
       openocd: [
         ['状态', defaultTc.openocdBin ? '本地已就绪' : '未安装'],

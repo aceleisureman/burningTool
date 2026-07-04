@@ -34,6 +34,7 @@ function addListTokens(out, text) {
 
 function parseMakefileAsmSources(txt) {
   return [
+    ...parseMakefileListVar(txt, 'ASOURCES'),
     ...parseMakefileListVar(txt, 'ASM_SOURCES'),
     ...parseMakefileListVar(txt, 'ASMM_SOURCES')
   ];
