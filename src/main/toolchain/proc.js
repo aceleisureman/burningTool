@@ -6,10 +6,12 @@ const bus = require('../core/bus');
 
 /* ── 通用进程执行：按行流式输出 + 可选清洗器 + Promise(退出码) ── */
 function runProcess(cmd, args, options = {}) {
-  const { clean, capture, ...spawnOpts } = options;
+  const { clean, capture, timeoutMs, ...spawnOpts } = options;
   return new Promise((resolve) => {
     const child = spawn(cmd, args, spawnOpts);
     let captured = '';
+    let done = false;
+    let timer = null;
     const emit = (line) => {
       if (capture) captured += line + '\n';
       if (clean) {
@@ -37,14 +39,39 @@ function runProcess(cmd, args, options = {}) {
         end: () => { buf += decoder.end(); if (buf) { emit(buf); buf = ''; } }
       };
     };
+    const finish = (result) => {
+      if (done) return;
+      done = true;
+      if (timer) clearTimeout(timer);
+      resolve(result);
+    };
+    const killProcessTree = () => {
+      try {
+        if (process.platform === 'win32' && child.pid) spawn('taskkill', ['/pid', String(child.pid), '/T', '/F']);
+        else child.kill('SIGKILL');
+      } catch {}
+    };
     const so = makeSink(), se = makeSink();
+    if (timeoutMs) {
+      timer = setTimeout(() => {
+        killProcessTree();
+        so.end();
+        se.end();
+        finish(capture ? { code: -2, out: captured, timedOut: true } : -2);
+      }, timeoutMs);
+    }
     if (child.stdout) child.stdout.on('data', so.push);
     if (child.stderr) child.stderr.on('data', se.push);
     child.on('error', (err) => {
       bus.send(`[系统] 无法启动: ${cmd} (${err.message})`, 'error');
-      resolve(capture ? { code: -1, out: captured } : -1);
+      finish(capture ? { code: -1, out: captured } : -1);
     });
-    child.on('close', (code) => { so.end(); se.end(); resolve(capture ? { code, out: captured } : code); });
+    child.on('close', (code) => {
+      if (done) return;
+      so.end();
+      se.end();
+      finish(capture ? { code, out: captured } : code);
+    });
   });
 }
 

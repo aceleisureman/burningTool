@@ -21,6 +21,8 @@ const {
   findExecutableOnPath
 } = require('../toolchain/toolchain');
 
+const PYOCD_FLASH_TIMEOUT_MS = 45000;
+
 async function pyocdHasTarget(pyocd, target) {
   const { out } = await runCapture(pyocd, ['list', '--targets'], { shell: false, timeoutMs: 20000 });
   // target 经 normalizePyocdTarget 只含 [a-z0-9]，无正则特殊字符；按独立 token 匹配，容忍不同版本表格缩进/列布局
@@ -642,12 +644,18 @@ async function flashPyocd(projectDir, cfg) {
     cwd: projectDir,
     shell: false,
     clean: cleanPyocd,
-    capture: true
+    capture: true,
+    timeoutMs: PYOCD_FLASH_TIMEOUT_MS
   });
   const code = result.code;
   if (code === 0) {
     bus.send('[烧录] ✓ 烧录成功，芯片已复位', 'success');
     return true;
+  }
+  if (result.timedOut) {
+    bus.send(`[烧录] ✗ 烧录超时（${Math.round(PYOCD_FLASH_TIMEOUT_MS / 1000)} 秒），已停止 pyOCD`, 'error');
+    bus.send('[建议] 请检查烧录器是否插入、USB 数据线是否正常、目标板是否供电，或关闭“复位下连接”后重试', 'info');
+    return false;
   }
   const diagnostics = diagnosePyocdOutput(result.out, { target });
   for (const d of diagnostics) {
