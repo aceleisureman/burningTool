@@ -72,6 +72,27 @@
         </div>
         <div class="about-name">STM32 工具箱</div>
         <div class="about-ver">版本 v{{ appVersion }}</div>
+        <div class="about-update">
+          <el-button
+            v-if="updateState.status !== 'downloaded'"
+            size="small" type="primary" plain
+            :loading="updateState.status === 'checking' || updateChecking"
+            @click="checkUpdate">
+            {{ updateState.status === 'downloading' ? `下载中 ${updateState.percent}%` : '检查更新' }}
+          </el-button>
+          <el-button
+            v-else
+            size="small" type="success"
+            @click="installUpdate">
+            重启安装 v{{ updateState.version }}
+          </el-button>
+          <div class="about-update-tip">
+            <span v-if="updateState.status === 'latest'">已是最新版本</span>
+            <span v-else-if="updateState.status === 'downloading'">正在下载新版本 v{{ updateState.version }}…</span>
+            <span v-else-if="updateState.status === 'downloaded'">新版本已就绪，点击重启完成更新</span>
+            <span v-else-if="updateState.status === 'error'" class="about-update-err">{{ updateState.error }}</span>
+          </div>
+        </div>
         <div class="about-desc">可视化编译烧录 · StcGal · 串口调试 · MQTT 调试 · 字模生成</div>
         <div class="about-divider"></div>
         <div class="about-org">锐新网络科技有限公司</div>
@@ -1332,6 +1353,7 @@ import { useEsp32 } from './composables/useEsp32.js';
 import { useHardwareDebug } from './composables/useHardwareDebug.js';
 import { useRamLog } from './composables/useRamLog.js';
 import { useFirmwareAnalysis } from './composables/useFirmwareAnalysis.js';
+import { useUpdate } from './composables/useUpdate.js';
 
 export default {
   setup() {
@@ -1340,7 +1362,7 @@ export default {
     const prevTool = ref('flash');
     const navCollapsed = ref(false);
     const aboutVisible = ref(false);
-    const appVersion = '1.0.0';
+    const appVersion = ref('1.0.0');
     function toggleNav() { navCollapsed.value = !navCollapsed.value; try { localStorage.setItem('nav-collapsed', navCollapsed.value ? '1' : '0'); } catch (e) {} }
     const appShell = { tool, prevTool };
 
@@ -1357,17 +1379,20 @@ export default {
     const hardware = useHardwareDebug({ appendLog: log.appendLog });
     const ramlog = useRamLog({ settings });
     const firmware = useFirmwareAnalysis({ appendLog: log.appendLog, flash });
+    const update = useUpdate();
 
     onMounted(() => {
       try { navCollapsed.value = localStorage.getItem('nav-collapsed') === '1'; } catch (e) {}
       // loadConfig 读取配置后再分发给串口/ MQTT 域（见 useSettings.loadConfig）
       settings.loadConfig().then(() => ramlog.applyRamLogConfig(settings.config.ramLogConfig));
       settings.checkEnv(); flash.loadRecent(); settings.refreshDefaultTc();
+      // 读取真实版本号并同步一次更新状态
+      update.initUpdate().then(() => { if (update.updateState.currentVersion) appVersion.value = update.updateState.currentVersion; });
     });
 
     return {
       tool, navCollapsed, toggleNav, aboutVisible, appVersion,
-      ...theme, ...log, ...glyph, ...settings, ...flash, ...stc51Tool, ...esp32Tool, ...hardware, ...ramlog, ...firmware, ...serial, ...mqtt,
+      ...theme, ...log, ...glyph, ...settings, ...flash, ...stc51Tool, ...esp32Tool, ...hardware, ...ramlog, ...firmware, ...serial, ...mqtt, ...update,
       FolderOpened, VideoPlay, Upload, CaretRight, Delete, Download, MagicStick, CopyDocument,
       Connection, SwitchButton, Promotion, Plus, Close, RefreshRight, VideoPause, Cpu,
       Operation, Document, DataAnalysis, DataLine
