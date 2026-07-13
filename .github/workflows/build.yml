@@ -6,6 +6,9 @@ on:
       - master
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     strategy:
@@ -17,7 +20,7 @@ jobs:
           - os: macos-latest
             args: --mac --universal
           - os: ubuntu-latest
-            args: --linux
+            args: --linux AppImage --x64
 
     runs-on: ${{ matrix.os }}
 
