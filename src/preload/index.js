@@ -57,5 +57,9 @@ contextBridge.exposeInMainWorld('api', {
   httpApiStatus:    () => ipcRenderer.invoke('http-api-status'),
   httpApiStart:     (opts) => ipcRenderer.invoke('http-api-start', opts),
   httpApiStop:      () => ipcRenderer.invoke('http-api-stop'),
+  // ── 自动更新（GitHub Releases）──
+  updateCheck:      () => ipcRenderer.invoke('update-check'),    // 手动检查更新
+  updateStatus:     () => ipcRenderer.invoke('update-status'),   // 当前更新状态/进度
+  updateInstall:    () => ipcRenderer.invoke('update-install'),  // 重启并安装已下载的更新
   copyToClipboard:  (text) => ipcRenderer.invoke('clipboard-write', text)  // 收到消息
 });

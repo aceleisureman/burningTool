@@ -47,6 +47,7 @@ const {
 const { analyzeFirmware } = require('./firmware/analyzer');
 const { readRamLog } = require('./ramlog/ramlog');
 const httpApi = require('./core/http-server');
+const updater = require('./core/updater');
 const windows = require('./windows');
 
 const APP_ICON = path.join(__dirname, '..', '..', 'assets', 'icons', 'icon.png');
@@ -84,6 +85,7 @@ if (!gotSingleInstanceLock) {
     }
     windows.createWindow();
     startHttpApiFromConfig();
+    updater.checkOnStartup();
   });
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) windows.createWindow();
@@ -120,6 +122,11 @@ ipcMain.handle('http-api-stop', async () => {
   saveConfig(Object.assign({}, cfg, { httpApi: Object.assign({}, cfg.httpApi || {}, { enabled: false }) }));
   return { ok: true };
 });
+
+/* ── 自动更新（GitHub Releases）───────────────────────── */
+ipcMain.handle('update-check', () => updater.checkNow());
+ipcMain.handle('update-status', () => updater.getState());
+ipcMain.handle('update-install', () => updater.quitAndInstall());
 
 /* ── IPC ──────────────────────────────────────────────── */
 

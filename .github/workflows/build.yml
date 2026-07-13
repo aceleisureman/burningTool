@@ -13,11 +13,11 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            script: dist:win
+            args: --win --x64
           - os: macos-latest
-            script: dist:mac-all
+            args: --mac --universal
           - os: ubuntu-latest
-            script: dist:linux
+            args: --linux
 
     runs-on: ${{ matrix.os }}
 
@@ -34,48 +34,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build & package
-        run: npm run ${{ matrix.script }}
+      # 每次构建生成递增版本号 1.0.<构建号>，electron-updater 依赖版本号判断是否有新版
+      - name: Set build version
+        shell: bash
+        run: npm version "1.0.${{ github.run_number }}" --no-git-tag-version
+
+      # electron-builder 直接发布到 GitHub Release（tag v1.0.<构建号>），
+      # 同时上传 latest.yml / latest-mac.yml / latest-linux.yml 供应用内自动更新
+      - name: Build & publish
+        shell: bash
+        run: npx vite build && npx electron-builder ${{ matrix.args }} --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: false
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.os }}-dist
-          path: |
-            dist/*.exe
-            dist/*.dmg
-            dist/*.zip
-            dist/*.AppImage
-            dist/*.deb
-            dist/*.rpm
-            dist/*.snap
-          if-no-files-found: ignore
-
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Read version
-        id: ver
-        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ steps.ver.outputs.version }}-build${{ github.run_number }}
-          name: MCU工具箱 v${{ steps.ver.outputs.version }} (build ${{ github.run_number }})
-          files: artifacts/**/*
-          generate_release_notes: true
