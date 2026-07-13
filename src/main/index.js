@@ -1,4 +1,7 @@
-const { app, BrowserWindow, ipcMain, dialog, nativeImage } = require('electron');
+// 加载 polyfill（install() 内部用 setImmediate 延迟执行，
+// 先让 Electron 二进制 patch require('electron')，主进程代码首次 require 拿到真实 API）
+require('./electron-api');
+const { app, BrowserWindow, ipcMain, dialog, nativeImage, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const {
@@ -43,6 +46,7 @@ const {
 } = require('./flash/esp32');
 const { analyzeFirmware } = require('./firmware/analyzer');
 const { readRamLog } = require('./ramlog/ramlog');
+const httpApi = require('./core/http-server');
 const windows = require('./windows');
 
 const APP_ICON = path.join(__dirname, '..', '..', 'assets', 'icons', 'icon.png');
@@ -74,24 +78,56 @@ if (!gotSingleInstanceLock) {
 } else {
   app.on('second-instance', () => windows.focusOrCreate());
   app.whenReady().then(() => {
-    // macOS 忽略 BrowserWindow 的 icon 选项，Dock 图标需用 app.dock.setIcon 显式设置
     if (process.platform === 'darwin' && app.dock) {
       const dockImg = nativeImage.createFromPath(APP_ICON);
       if (!dockImg.isEmpty()) app.dock.setIcon(dockImg);
     }
     windows.createWindow();
+    startHttpApiFromConfig();
   });
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) windows.createWindow();
   });
 }
 app.on('window-all-closed', () => app.quit());
+app.on('before-quit', () => { try { httpApi.stop(); } catch {} });
+
+/* ── 本地 HTTP API：启动 + IPC ────────────────────────── */
+async function startHttpApiFromConfig() {
+  const cfg = loadConfig();
+  const api = cfg.httpApi || {};
+  if (api.enabled === false) return;
+  try {
+    const bound = await httpApi.start({ host: api.host || '127.0.0.1', port: api.port || 27080 });
+    send(`[HTTP-API] 已启用: http://${bound.host}:${bound.port}  (POST /api/build-flash 一键编译烧录)`, 'info');
+  } catch (e) {
+    send(`[HTTP-API] ✗ 启动失败: ${e.message}`, 'error');
+  }
+}
+ipcMain.handle('http-api-status', () => httpApi.status());
+ipcMain.handle('http-api-start', async (_e, opts) => {
+  try {
+    const cfg = loadConfig();
+    const api = Object.assign({}, cfg.httpApi || {}, opts || {});
+    const bound = await httpApi.start({ host: api.host || '127.0.0.1', port: api.port || 27080 });
+    saveConfig(Object.assign({}, cfg, { httpApi: Object.assign({}, api, { enabled: true }) }));
+    return { ok: true, bind: bound };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
+ipcMain.handle('http-api-stop', async () => {
+  await httpApi.stop();
+  const cfg = loadConfig();
+  saveConfig(Object.assign({}, cfg, { httpApi: Object.assign({}, cfg.httpApi || {}, { enabled: false }) }));
+  return { ok: true };
+});
 
 /* ── IPC ──────────────────────────────────────────────── */
-ipcMain.handle('toolchain-status', () => ({ installed: isToolchainInstalled(), dir: toolsDir() }));
+
+ipcMain.handle('clipboard-write', (_e, text) => { clipboard.writeText(String(text || '')); return true; });
+ipcMain.handle('toolchain-status', () => ({ installed: isToolchainInstalled('arm-gcc'), dir: toolsDir() }));
 ipcMain.handle('install-toolchain', async () => {
   try {
-    return await installToolchain(loadConfig());
+    return await installToolchain('arm-gcc');
   } catch (e) {
     send(`[环境] ✗ 安装失败: ${e.message}`, 'error');
     return { installed: false, error: e.message };

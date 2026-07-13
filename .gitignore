@@ -27,3 +27,8 @@ __pycache__/
 # IDE
 .vscode/
 .idea/
+
+# 本地临时输出
+_test_out.txt
+install_out.txt
+.claude/

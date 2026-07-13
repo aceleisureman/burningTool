@@ -1,4 +1,6 @@
-const { contextBridge, ipcRenderer } = require('electron');
+// 当 Electron 二进制未正确注入 API 时，使用 polyfill
+const electronAPI = require('electron');
+const { contextBridge, ipcRenderer } = electronAPI;
 
 contextBridge.exposeInMainWorld('api', {
   selectDirectory: () => ipcRenderer.invoke('select-directory'),
@@ -50,5 +52,10 @@ contextBridge.exposeInMainWorld('api', {
   mqttUnsubscribe:  (opts) => ipcRenderer.invoke('mqtt-unsubscribe', opts),   // 退订 {topic}
   mqttPublish:      (opts) => ipcRenderer.invoke('mqtt-publish', opts),       // 发布 {topic,payload,qos,retain}
   onMqttStatus:     (cb) => ipcRenderer.on('mqtt-status', (_e, s) => cb(s)),  // 连接状态变化
-  onMqttMessage:    (cb) => ipcRenderer.on('mqtt-message', (_e, m) => cb(m))  // 收到消息
+  onMqttMessage:    (cb) => ipcRenderer.on('mqtt-message', (_e, m) => cb(m)),
+  // ── 本地 HTTP API ──
+  httpApiStatus:    () => ipcRenderer.invoke('http-api-status'),
+  httpApiStart:     (opts) => ipcRenderer.invoke('http-api-start', opts),
+  httpApiStop:      () => ipcRenderer.invoke('http-api-stop'),
+  copyToClipboard:  (text) => ipcRenderer.invoke('clipboard-write', text)  // 收到消息
 });

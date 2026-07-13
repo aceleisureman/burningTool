@@ -47,7 +47,7 @@ function launchElectron() {
   electron = spawn(electronBin, ['.'], {
     stdio: 'inherit',
     cwd: ROOT,
-    env: { ...process.env, VITE_DEV_SERVER_URL: DEV_URL }
+    env: (() => { const e = { ...process.env, VITE_DEV_SERVER_URL: DEV_URL }; delete e.ELECTRON_RUN_AS_NODE; return e; })()
   });
   electron.on('exit', (code) => { cleanup(); process.exit(code || 0); });
 }

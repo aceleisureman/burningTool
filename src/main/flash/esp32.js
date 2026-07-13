@@ -85,13 +85,17 @@ function resolveFlashParts(opts) {
 }
 
 async function probeInvocation(command, argsPrefix) {
-  const version = await runCapture(command, [...argsPrefix, 'version'], { shell: false, timeoutMs: 8000 });
-  const help = version.code === 0 ? version : await runCapture(command, [...argsPrefix, '--version'], { shell: false, timeoutMs: 8000 });
-  const text = String(`${version.out || ''}\n${help.out || ''}`).trim();
-  if (version.code === 0 || /esptool|v\d+\.\d+/i.test(text)) {
-    return { ok: true, command, argsPrefix, version: text.split(/\r?\n/).find(Boolean) || 'esptool' };
+  try {
+    const version = await runCapture(command, [...argsPrefix, 'version'], { shell: false, timeoutMs: 8000 });
+    const help = version.code === 0 ? version : await runCapture(command, [...argsPrefix, '--version'], { shell: false, timeoutMs: 8000 });
+    const text = String(`${version.out || ''}\n${help.out || ''}`).trim();
+    if (version.code === 0 || /esptool|v\d+\.\d+/i.test(text)) {
+      return { ok: true, command, argsPrefix, version: text.split(/\r?\n/).find(Boolean) || 'esptool' };
+    }
+    return { ok: false };
+  } catch (err) {
+    return { ok: false };
   }
-  return { ok: false };
 }
 
 async function resolveEsptoolInvocation(cfg = {}, opts = {}) {

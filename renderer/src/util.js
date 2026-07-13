@@ -90,6 +90,10 @@ export function hexToBytes(str) {
 
 export async function copyText(text) {
   const value = String(text ?? '');
+  if (window.api && window.api.copyToClipboard) {
+    await window.api.copyToClipboard(value);
+    return;
+  }
   if (navigator.clipboard && window.isSecureContext) {
     await navigator.clipboard.writeText(value);
     return;

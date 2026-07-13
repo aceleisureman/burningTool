@@ -75,7 +75,12 @@ const DEFAULT_CONFIG = {
   }, // ESP32/ESP8266 esptool 烧录配置
   platformPaths: {}, // 分平台路径配置 { windows|macos|linux: { armGccPath, makePath, pyocdPath, cubeMxPath, keilUV4Path } }
   serialQuickCmds: [], // 旧版：扁平快捷指令列表（兼容迁移用）
-  serialCmdGroups: []  // 串口快捷指令分组 [{name, cmds:[{name,content,hex,interval,unit,enabled}]}]
+  serialCmdGroups: [], // 串口快捷指令分组 [{name, cmds:[{name,content,hex,interval,unit,enabled}]}]
+  httpApi: {           // 本地 HTTP API：外部工具可 POST /api/build-flash 触发一键编译烧录
+    enabled: true,     // 主进程启动时是否自动开启
+    host: '127.0.0.1', // 仅监听回环；改成 0.0.0.0 才对外暴露（不推荐）
+    port: 27080        // TCP 端口
+  }
 };
 
 /* ── 配置读写 ─────────────────────────────────────────── */

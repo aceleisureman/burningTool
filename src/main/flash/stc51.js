@@ -58,11 +58,15 @@ function firmwareInfo(filePath, required = true) {
 }
 
 async function probeInvocation(command, argsPrefix) {
-  const version = await runCapture(command, [...argsPrefix, '--version'], { shell: false, timeoutMs: 8000 });
-  const help = version.code === 0 ? version : await runCapture(command, [...argsPrefix, '-h'], { shell: false, timeoutMs: 8000 });
-  const text = String(`${version.out || ''}\n${help.out || ''}`).trim();
-  if (version.code === 0 || /stcgal/i.test(text)) return { ok: true, command, argsPrefix, version: text.split(/\r?\n/).find(Boolean) || 'stcgal' };
-  return { ok: false };
+  try {
+    const version = await runCapture(command, [...argsPrefix, '--version'], { shell: false, timeoutMs: 8000 });
+    const help = version.code === 0 ? version : await runCapture(command, [...argsPrefix, '-h'], { shell: false, timeoutMs: 8000 });
+    const text = String(`${version.out || ''}\n${help.out || ''}`).trim();
+    if (version.code === 0 || /stcgal/i.test(text)) return { ok: true, command, argsPrefix, version: text.split(/\r?\n/).find(Boolean) || 'stcgal' };
+    return { ok: false };
+  } catch (err) {
+    return { ok: false };
+  }
 }
 
 async function resolveStcgalInvocation(cfg = {}, opts = {}) {
