@@ -1,4 +1,4 @@
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { baseName } from '../util.js';
 
 // 烧录工具：工程识别 + 编译/烧录/一键 + 芯片探测 + 历史项目
@@ -19,8 +19,26 @@ export function useFlash(deps) {
   const building   = ref(false);
   const flashing   = ref(false);
   const generating = ref(false);
+  // 历史侧栏：默认展开；开启自动隐藏后，选项目/开始编译烧录会自动收起腾出日志区
   const historyOpen = ref(true);
+  const historyAutoHide = ref(true);
   const recent      = ref([]);
+
+  try {
+    const savedOpen = localStorage.getItem('flash-history-open');
+    if (savedOpen === '0' || savedOpen === '1') historyOpen.value = savedOpen === '1';
+    const savedAuto = localStorage.getItem('flash-history-autohide');
+    if (savedAuto === '0' || savedAuto === '1') historyAutoHide.value = savedAuto === '1';
+  } catch {}
+
+  function persistHistoryPrefs() {
+    try {
+      localStorage.setItem('flash-history-open', historyOpen.value ? '1' : '0');
+      localStorage.setItem('flash-history-autohide', historyAutoHide.value ? '1' : '0');
+    } catch {}
+  }
+  watch(historyOpen, persistHistoryPrefs);
+  watch(historyAutoHide, persistHistoryPrefs);
 
   const busy = computed(() => building.value || flashing.value || generating.value);
   const projectValid = computed(() => hasMakefile.value || hasKeil.value);
@@ -39,7 +57,19 @@ export function useFlash(deps) {
     return '空闲';
   });
 
-  function toggleHistory() { historyOpen.value = !historyOpen.value; }
+  function setHistoryOpen(open) {
+    historyOpen.value = !!open;
+  }
+  function toggleHistory() {
+    setHistoryOpen(!historyOpen.value);
+  }
+  function toggleHistoryAutoHide() {
+    historyAutoHide.value = !historyAutoHide.value;
+  }
+  // 自动隐藏：仅在开启时收起，不强制展开（重新打开只靠右上角按钮）
+  function maybeAutoHideHistory() {
+    if (historyAutoHide.value && historyOpen.value) setHistoryOpen(false);
+  }
   async function loadRecent() { try { recent.value = (await window.api.getRecent()) || []; } catch {} }
   function applyDirInfo(r) {
     hasMakefile.value = !!r.hasMakefile; hasKeil.value = !!r.hasKeil; keilProject.value = r.keilProject || '';
@@ -54,6 +84,7 @@ export function useFlash(deps) {
       else if (!r.hasMakefile && !r.hasKeil) appendLog({ text: '[系统] ⚠ 该目录下没有 Makefile 或 Keil 工程(.uvprojx)', type: 'error' });
     }
     await window.api.addRecent(dir); loadRecent();
+    maybeAutoHideHistory();
   }
   async function delRecent(dir) { try { recent.value = (await window.api.removeRecent(dir)) || []; } catch {} }
   async function selectDir() {
@@ -64,17 +95,20 @@ export function useFlash(deps) {
       if (!result.hasMakefile && !result.hasKeil && result.hasIoc) appendLog({ text: '[系统] 检测到 CubeMX 工程(.ioc) 但无 Makefile，点「一键生成 Makefile」即可', type: 'info' });
       else if (!result.hasMakefile && !result.hasKeil) appendLog({ text: '[系统] ⚠ 该目录下没有 Makefile 或 Keil 工程(.uvprojx)', type: 'error' });
       loadRecent();
+      maybeAutoHideHistory();
     }
   }
 
   async function doBuild() {
     building.value = true; lastResult.value = null; appendLog({ text: '═════════ 开始编译 ═════════', type: 'step' });
+    maybeAutoHideHistory();
     try { const r = await window.api.build(projectDir.value); lastResult.value = r && r.success ? 'ok' : 'err'; }
     catch (e) { appendLog({ text: `[异常] ${e.message}`, type: 'error' }); lastResult.value = 'err'; }
     finally { building.value = false; }
   }
   async function doFlash() {
     flashing.value = true; lastResult.value = null; appendLog({ text: '═════════ 开始烧录 ═════════', type: 'step' });
+    maybeAutoHideHistory();
     try { const r = await window.api.flash(projectDir.value); lastResult.value = r && r.success ? 'ok' : 'err'; }
     catch (e) { appendLog({ text: `[异常] ${e.message}`, type: 'error' }); lastResult.value = 'err'; }
     finally { flashing.value = false; }
@@ -102,6 +136,7 @@ export function useFlash(deps) {
   }
   async function doGenerateMakefile() {
     generating.value = true; lastResult.value = null; appendLog({ text: '═════════ 一键生成 Makefile (STM32CubeMX) ═════════', type: 'step' });
+    maybeAutoHideHistory();
     try {
       const r = await window.api.generateMakefile(projectDir.value);
       if (r && r.ok) { const info = await window.api.checkDir(projectDir.value); applyDirInfo(info); lastResult.value = 'ok'; ElMessage.success('Makefile 已生成，可编译烧录了'); }
@@ -111,6 +146,7 @@ export function useFlash(deps) {
   }
   async function doBuildAndFlash() {
     building.value = true; flashing.value = true; lastResult.value = null; appendLog({ text: '═════════ 一键编译烧录 ═════════', type: 'step' });
+    maybeAutoHideHistory();
     try {
       const r = await window.api.buildAndFlash(projectDir.value);
       if (!r.buildOk) { appendLog({ text: '[系统] 编译失败，跳过烧录', type: 'error' }); lastResult.value = 'err'; }
@@ -123,7 +159,8 @@ export function useFlash(deps) {
     projectDir, hasMakefile, hasKeil, keilProject, hasIoc, iocFile, building, flashing, generating, busy,
     canOperate, projectValid, pathClass, buildSysLabel, flashLabel, statusKind, statusText,
     selectDir, doBuild, doFlash, doBuildAndFlash, doCheckProbe, doReadChipInfo, doGenerateMakefile,
-    historyOpen, recent, toggleHistory, openRecent, delRecent,
+    historyOpen, historyAutoHide, recent, toggleHistory, toggleHistoryAutoHide,
+    openRecent, delRecent,
     loadRecent, baseName
   };
 }

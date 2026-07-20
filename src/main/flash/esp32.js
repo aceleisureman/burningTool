@@ -98,7 +98,24 @@ async function probeInvocation(command, argsPrefix) {
   }
 }
 
+// 探测结果缓存：每次面板状态查询/烧录都从头串行 spawn 多个候选（Windows 上 Python 冷启动
+// 数百 ms、不存在的候选还要等超时）太慢。按配置的 esptool 路径作 key 缓存成功结果；
+// 命中时若 command 是具体路径则校验仍存在，被删除/移动后自动重探。只缓存成功，失败每次重试。
+let _esptoolCache = null;   // { key, result }
+
 async function resolveEsptoolInvocation(cfg = {}, opts = {}) {
+  const key = cleanPath(opts.esptoolPath || cfg.esptoolPath) || '';
+  if (_esptoolCache && _esptoolCache.key === key) {
+    const c = _esptoolCache.result;
+    if (!/[\\/]/.test(c.command) || fs.existsSync(c.command)) return c;
+    _esptoolCache = null;
+  }
+  const r = await resolveEsptoolInvocationUncached(cfg, opts);
+  if (r.ok) _esptoolCache = { key, result: r };
+  return r;
+}
+
+async function resolveEsptoolInvocationUncached(cfg = {}, opts = {}) {
   const { findExecutableOnPath, localEsptoolBin, localEsptoolPython } = toolchain();
   // 与 pyOCD/OpenOCD/stcgal 一致：优先项目根目录 toolchain/esptool 下的独立环境
   const localBin = localEsptoolBin();

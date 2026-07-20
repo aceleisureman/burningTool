@@ -50,8 +50,25 @@ function registerSerial(ipcMain, push) {
       });
       await new Promise((resolve, reject) => port.open((err) => (err ? reject(err) : resolve())));
       activeSerial = port;
-      port.on('data', (buf) => pushSerial('serial-data', Array.from(buf)));
-      port.on('close', () => pushSerial('serial-closed'));
+      // 攒批推送：Windows 驱动常把数据切成几字节一个 data 事件，高波特率下每秒数百次，
+      // 逐条 IPC + Array.from 普通数组会拖垮渲染端。这里合并 30ms 窗口内的数据一次推送，
+      // 直接传 Uint8Array（结构化克隆按字节拷贝，远快于 Number 数组）。
+      let rxChunks = [];
+      let rxSize = 0;
+      let rxTimer = null;
+      const flushRx = () => {
+        if (rxTimer) { clearTimeout(rxTimer); rxTimer = null; }
+        if (!rxChunks.length) return;
+        const merged = rxChunks.length === 1 ? rxChunks[0] : Buffer.concat(rxChunks, rxSize);
+        rxChunks = []; rxSize = 0;
+        pushSerial('serial-data', new Uint8Array(merged));
+      };
+      port.on('data', (buf) => {
+        rxChunks.push(buf); rxSize += buf.length;
+        if (rxSize >= 65536) flushRx();                       // 高吞吐时按体积提前刷，限制驻留内存
+        else if (!rxTimer) rxTimer = setTimeout(flushRx, 30);
+      });
+      port.on('close', () => { flushRx(); pushSerial('serial-closed'); });
       port.on('error', (err) => pushSerial('serial-error', err && err.message ? err.message : String(err)));
       return { ok: true };
     } catch (e) { return { ok: false, error: e.message }; }

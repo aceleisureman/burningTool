@@ -77,7 +77,7 @@ function detectProject(dir) {
     keilProject: keilProj ? path.relative(dir, keilProj) || path.basename(keilProj) : '',
     hasIoc: !!iocFile,
     iocFile: iocFile ? path.relative(dir, iocFile) || path.basename(iocFile) : '',
-    buildSystem: detectBuildSystem(dir, loadConfig())
+    buildSystem: detectBuildSystem(dir, loadConfig(), keilProj)
   };
 }
 

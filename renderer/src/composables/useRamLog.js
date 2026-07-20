@@ -52,15 +52,16 @@ export function useRamLog(deps) {
       if (el && ramLog.autoScroll) el.scrollTop = el.scrollHeight;
     });
   }
-  async function readRamLogOnce() {
+  // quiet=true 供轮询使用：主进程跳过每次固定的环境日志，避免刷屏
+  async function readRamLogOnce(quiet) {
     if (ramLog.busy) return;
     ramLog.busy = true;
     try {
-      const r = await window.api.readRamLog(ramLogPlainConfig());
+      const r = await window.api.readRamLog(Object.assign(ramLogPlainConfig(), quiet === true ? { quiet: true } : null));
       ramLog.pyocd = r.pyocd || '';
       ramLog.target = r.target || '';
       if (r.meta) Object.assign(ramLog.meta, r.meta);
-      if (r && r.text != null) ramLog.text = r.text;
+      if (r && r.text != null && r.text !== ramLog.text) ramLog.text = r.text;  // 内容没变不触发重渲染
       if (r && r.ok) {
         ramLog.lastOk = true; ramLog.error = ''; ramLog.notice = '';
       } else if (r && r.meta && !r.meta.magicOk) {
@@ -85,7 +86,7 @@ export function useRamLog(deps) {
     ramLog.running = true;
     await readRamLogOnce();
     ramLogTimer = setInterval(() => {
-      if (!ramLog.busy) readRamLogOnce();
+      if (!ramLog.busy) readRamLogOnce(true);
     }, Math.max(200, Number(ramLog.interval) || 500));
   }
   function toggleRamLog() {

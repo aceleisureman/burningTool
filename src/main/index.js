@@ -52,15 +52,30 @@ const windows = require('./windows');
 
 const APP_ICON = path.join(__dirname, '..', '..', 'assets', 'icons', 'icon.png');
 /* ── 日志助手 ─────────────────────────────────────────── */
-function send(text, type = 'info') {
+// 攒批：make 全量编译每秒可产生数百行日志，逐条 webContents.send 的 IPC 洪流会拖慢两端；
+// 合并 30ms 窗口内的条目成数组一次推送（渲染端 useLog.appendLog 兼容数组/单条）
+let _logQueue = [];
+let _logTimer = null;
+function flushLogQueue() {
+  if (_logTimer) { clearTimeout(_logTimer); _logTimer = null; }
+  if (!_logQueue.length) return;
+  const batch = _logQueue;
+  _logQueue = [];
   const w = windows.getMainWindow();
-  if (w) w.webContents.send('log', { text, type });
+  if (w) w.webContents.send('log', batch);
+}
+function queueLog(entry) {
+  _logQueue.push(entry);
+  if (_logQueue.length >= 500) flushLogQueue();
+  else if (!_logTimer) _logTimer = setTimeout(flushLogQueue, 30);
+}
+function send(text, type = 'info') {
+  queueLog({ text, type });
 }
 
 // 带 key 的进度日志：渲染端按 key 原地更新同一行，不刷屏
 function sendProgress(key, text) {
-  const w = windows.getMainWindow();
-  if (w) w.webContents.send('log', { text, type: 'progress', key });
+  queueLog({ text, type: 'progress', key });
 }
 
 // 驱动设置面板里的进度条
@@ -232,8 +247,8 @@ function dirInfo(dir) {
     keilProject: keilProj ? (path.relative(dir, keilProj) || path.basename(keilProj)) : '',
     hasIoc: !!iocFile,
     iocFile: iocFile ? (path.relative(dir, iocFile) || path.basename(iocFile)) : '',
-    // 在 auto 模式下该目录会用哪种编译方式
-    buildSystem: exists ? detectBuildSystem(dir, loadConfig()) : null
+    // 在 auto 模式下该目录会用哪种编译方式（复用上面已扫描的 keilProj，避免重复 BFS）
+    buildSystem: exists ? detectBuildSystem(dir, loadConfig(), keilProj) : null
   };
 }
 

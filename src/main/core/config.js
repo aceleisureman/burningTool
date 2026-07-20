@@ -125,9 +125,9 @@ function saveConfig(cfg) {
 function addRecent(dir) {
   if (!dir) return loadConfig().recentProjects;
   const cfg = loadConfig();
-  const list = (cfg.recentProjects || []).filter((d) => d !== dir);
-  list.unshift(dir);
-  cfg.recentProjects = list.slice(0, 12);
+  const list = cfg.recentProjects || [];
+  if (list[0] === dir) return list;   // 已在首位：每次编译/烧录/HTTP 任务都会调用，避免无意义重写 config.json
+  cfg.recentProjects = [dir, ...list.filter((d) => d !== dir)].slice(0, 12);
   saveConfig(cfg);
   return cfg.recentProjects;
 }

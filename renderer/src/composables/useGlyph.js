@@ -93,7 +93,10 @@ export function useGlyph() {
   }
 
   onMounted(() => {
-    watch(() => [gl.text, gl.font, gl.size, gl.bold, gl.threshold, gl.offX, gl.offY, gl.negative, gl.scan, gl.msb, gl.radix, gl.perLine, gl.comment], genGlyph, { immediate: true });
+    // 100ms 防抖：输入多字符 + 大点阵时，拖阈值/偏移滑块每帧同步重光栅化全部字符会掉帧
+    let genT = null;
+    const genDebounced = () => { clearTimeout(genT); genT = setTimeout(genGlyph, 100); };
+    watch(() => [gl.text, gl.font, gl.size, gl.bold, gl.threshold, gl.offX, gl.offY, gl.negative, gl.scan, gl.msb, gl.radix, gl.perLine, gl.comment], genDebounced, { immediate: true });
   });
 
   return { gl, copyGlyph, downloadGlyph };

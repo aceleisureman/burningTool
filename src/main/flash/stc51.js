@@ -69,7 +69,23 @@ async function probeInvocation(command, argsPrefix) {
   }
 }
 
+// 探测结果缓存：同 esp32.js —— 避免每次面板状态查询/烧录都重复串行 spawn 候选进程。
+// 只缓存成功结果；command 为具体路径时校验仍存在，失效自动重探。
+let _stcgalCache = null;   // { key, result }
+
 async function resolveStcgalInvocation(cfg = {}, opts = {}) {
+  const key = cleanPath(opts.stcgalPath || cfg.stcgalPath) || '';
+  if (_stcgalCache && _stcgalCache.key === key) {
+    const c = _stcgalCache.result;
+    if (!/[\\/]/.test(c.command) || fs.existsSync(c.command)) return c;
+    _stcgalCache = null;
+  }
+  const r = await resolveStcgalInvocationUncached(cfg, opts);
+  if (r.ok) _stcgalCache = { key, result: r };
+  return r;
+}
+
+async function resolveStcgalInvocationUncached(cfg = {}, opts = {}) {
   // 与烧录工具的 pyOCD/OpenOCD 一致：永远优先使用项目根目录 toolchain/stcgal 下的环境
   const localBin = localStcgalBin();
   if (fs.existsSync(localBin)) {

@@ -27,5 +27,13 @@ declare module 'vue' {
     ElSlider: typeof import('element-plus/es')['ElSlider']
     ElSwitch: typeof import('element-plus/es')['ElSwitch']
     ElTag: typeof import('element-plus/es')['ElTag']
+    LogClearBtn: typeof import('./src/components/LogClearBtn.vue')['default']
+    LogLineCount: typeof import('./src/components/LogLineCount.vue')['default']
+    LogPanel: typeof import('./src/components/LogPanel.vue')['default']
+    MqttMessages: typeof import('./src/components/MqttMessages.vue')['default']
+    MqttMsgCount: typeof import('./src/components/MqttMsgCount.vue')['default']
+    RamLogText: typeof import('./src/components/RamLogText.vue')['default']
+    SerialByteStats: typeof import('./src/components/SerialByteStats.vue')['default']
+    SerialTerminal: typeof import('./src/components/SerialTerminal.vue')['default']
   }
 }

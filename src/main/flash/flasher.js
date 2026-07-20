@@ -349,12 +349,13 @@ function makeTargetOverrideArgs(projectDir) {
 }
 
 // 判定实际使用的编译方式：'make' 或 'keil'
-function detectBuildSystem(projectDir, cfg) {
+// keilProj 可选：调用方已执行过 findKeilProject 时传入其结果（含 null），避免同一目录树被重复 BFS 扫描
+function detectBuildSystem(projectDir, cfg, keilProj) {
   const mode = (cfg && cfg.buildSystem) || 'auto';
   if (mode === 'make') return 'make';
   if (mode === 'keil') return KEIL_SUPPORTED ? 'keil' : 'make';
   // auto：Keil 工程优先；否则有 Makefile 走 make；都没有默认 make
-  if (KEIL_SUPPORTED && findKeilProject(projectDir)) return 'keil';
+  if (KEIL_SUPPORTED && (keilProj !== undefined ? keilProj : findKeilProject(projectDir))) return 'keil';
   if (fs.existsSync(path.join(projectDir, 'Makefile'))) return 'make';
   return 'make';
 }
@@ -499,8 +500,10 @@ async function compileMake(projectDir, cfg) {
     return false;
   }
 
-  bus.send('[编译] make -j4 ...', 'step');
-  const makeCode = await runProcess(makeCmd, ['-j4', ...tgtArgs], { cwd: projectDir, env, shell: useShell, clean: cleanMake });
+  // 并行度按 CPU 核数走（至少 2），写死 -j4 会浪费多核机器的编译时间
+  const jobs = Math.max(2, require('os').cpus().length);
+  bus.send(`[编译] make -j${jobs} ...`, 'step');
+  const makeCode = await runProcess(makeCmd, [`-j${jobs}`, ...tgtArgs], { cwd: projectDir, env, shell: useShell, clean: cleanMake });
   if (makeCode === 0) {
     bus.send('[编译] ✓ 编译成功', 'success');
     return true;

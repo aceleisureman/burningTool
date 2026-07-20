@@ -181,9 +181,12 @@ async function doReadRamLog(opts = {}, appConfig = {}) {
   const readBytes = read32ByteLength(ramCfg);
   const resetArg = appConfig.connectUnderReset ? ['-O', 'connect_mode=under-reset'] : [];
   const command = `read32 ${ramCfg.base} ${readBytes}`;
-  bus.send(`[内存日志] 系统: ${process.platform}/${process.arch}`, 'info');
-  bus.send(`[内存日志] pyOCD: ${pyocd}`, 'info');
-  bus.send(`[内存日志] 读取地址: ${ramCfg.base}，长度: ${totalBytes} bytes`, 'info');
+  // quiet：渲染端轮询模式传入，避免 2~5Hz 的固定环境日志刷屏烧录日志面板
+  if (!opts.quiet) {
+    bus.send(`[内存日志] 系统: ${process.platform}/${process.arch}`, 'info');
+    bus.send(`[内存日志] pyOCD: ${pyocd}`, 'info');
+    bus.send(`[内存日志] 读取地址: ${ramCfg.base}，长度: ${totalBytes} bytes`, 'info');
+  }
   const { code, out, timedOut } = await runCapture(pyocd, ['cmd', '-t', target, ...resetArg, '-c', command], {
     shell: false,
     timeoutMs: 12000

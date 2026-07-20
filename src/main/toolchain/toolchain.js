@@ -131,8 +131,18 @@ function localOpenocdBin() {
   return dir ? path.join(dir, name) : '';
 }
 
-// 在 root 下（有限深度）查找包含 exeName 的目录
+// 在 root 下（有限深度）查找包含 exeName 的目录。
+// 结果按 (root, exeName) 缓存：OpenOCD 等发行包内有上千个文件，effectivePaths 在
+// 一次编译/烧录流程里会被反复调用，Windows(NTFS+Defender) 下重复递归扫描很慢。
+// 命中缓存时先验证文件仍存在，被删除/移动则重新扫描。
+const _exeDirCache = new Map();
 function findExeDir(root, exeName, depth = 4) {
+  const cacheKey = `${root}::${exeName.toLowerCase()}`;
+  const hit = _exeDirCache.get(cacheKey);
+  if (hit) {
+    if (fs.existsSync(path.join(hit, exeName))) return hit;
+    _exeDirCache.delete(cacheKey);
+  }
   if (!fs.existsSync(root)) return null;
   const stack = [{ dir: root, d: 0 }];
   while (stack.length) {
@@ -140,7 +150,10 @@ function findExeDir(root, exeName, depth = 4) {
     let entries;
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
     for (const e of entries) {
-      if (e.isFile() && e.name.toLowerCase() === exeName.toLowerCase()) return dir;
+      if (e.isFile() && e.name.toLowerCase() === exeName.toLowerCase()) {
+        _exeDirCache.set(cacheKey, dir);
+        return dir;
+      }
     }
     if (d < depth) {
       for (const e of entries) {

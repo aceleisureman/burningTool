@@ -109,7 +109,9 @@
           <div><div class="pt-title">STM32 烧录工具</div><div class="pt-sub">pyOCD + ARM GCC · 可视化编译烧录</div></div>
           <div class="spacer"></div>
           <div class="status-pill" :class="statusKind"><span class="dot"></span>{{ statusText }}</div>
-          <button class="icon-btn" @click="toggleHistory" :title="historyOpen ? '收起历史' : '展开历史'"><el-icon :size="18"><Tickets /></el-icon></button>
+          <button class="icon-btn" :class="{ active: historyOpen }" @click="toggleHistory" :title="historyOpen ? '收起历史项目' : '展开历史项目'">
+            <el-icon :size="18"><Tickets /></el-icon>
+          </button>
         </div>
 
         <div class="flash-body">
@@ -160,7 +162,7 @@
                   <el-button :icon="Cpu" :disabled="busy" @click="doReadChipInfo" plain>读取芯片</el-button>
                   <el-button v-if="projectDir && hasIoc && !hasMakefile" type="primary" :icon="MagicStick" :loading="generating" :disabled="busy" @click="doGenerateMakefile" plain>生成 Makefile</el-button>
                   <el-button :type="envReady ? 'success' : 'warning'" :icon="Download" :loading="installing" :disabled="busy" @click="installEnv" plain>{{ envReady ? envButtonReadyText : envButtonText }}</el-button>
-                  <el-button class="danger-tool" :icon="Delete" :disabled="busy || logLines.length === 0" @click="clearLog" plain>清空日志</el-button>
+                  <LogClearBtn :busy="busy" :icon="Delete" @clear="clearLog" />
                 </div>
                 <div class="flash-method">
                   <div class="fm-head">
@@ -187,7 +189,7 @@
             <!-- 日志面板 -->
             <div class="log-panel">
               <div class="log-toolbar">
-                <span class="left"><span class="dots"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></span>终端输出 <span style="color:var(--text-dim);font-weight:400;">({{ logLines.length }})</span></span>
+                <span class="left"><span class="dots"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></span>终端输出 <span style="color:var(--text-dim);font-weight:400;"><LogLineCount /></span></span>
                 <span class="right">
                   <span @click="reverse = !reverse"><el-icon><Sort /></el-icon>{{ reverse ? '倒序' : '正序' }}</span>
                   <span @click="showTs = !showTs"><el-icon><Clock /></el-icon>{{ showTs ? '隐藏时间' : '显示时间' }}</span>
@@ -195,15 +197,21 @@
                   <span @click="autoScroll = !autoScroll"><el-icon><component :is="autoScroll ? 'Bottom' : 'Minus'" /></el-icon>{{ autoScroll ? '自动滚动' : '已暂停' }}</span>
                 </span>
               </div>
-              <div class="log-content" ref="logBox">
-                <div v-for="line in displayLines" :key="line.id" class="log-line" :class="line.type"><span class="ts" v-if="showTs">{{ line.ts }}</span><span class="msg">{{ line.text }}</span></div>
-                <div v-if="logLines.length === 0" class="log-empty"><div class="big">⌁</div>等待操作…选择项目目录后即可编译 / 烧录</div>
-              </div>
+              <!-- v-if 跟随面板可见性：三份相同日志列表只挂载当前面板这一份；列表本体在 LogPanel 内隔离重渲染 -->
+              <LogPanel v-if="tool === 'flash'" pane="flash" empty="等待操作…选择项目目录后即可编译 / 烧录" />
             </div>
           </div>
 
           <aside class="history" :class="{ collapsed: !historyOpen }">
-            <div class="history-head"><span>历史项目 <span style="color:var(--text-dim);font-weight:400;">({{ recent.length }})</span></span><el-icon style="cursor:pointer;color:var(--text-dim);" @click="toggleHistory" title="收起"><Fold /></el-icon></div>
+            <div class="history-head">
+              <span>历史项目 <span class="history-count">({{ recent.length }})</span></span>
+              <span class="history-head-actions">
+                <span class="history-auto" :class="{ on: historyAutoHide }" @click="toggleHistoryAutoHide" :title="historyAutoHide ? '已开启：选项目/编译烧录后自动收起' : '已关闭：保持当前展开状态'">
+                  <el-icon><component :is="historyAutoHide ? 'Hide' : 'View'" /></el-icon>自动隐藏
+                </span>
+                <el-icon class="history-fold" @click="toggleHistory" title="收起"><Fold /></el-icon>
+              </span>
+            </div>
             <div class="history-list">
               <div v-for="d in recent" :key="d" class="history-item" :class="{ active: d === projectDir }" @click="openRecent(d)">
                 <div class="row"><span class="name">{{ baseName(d) }}</span><el-icon class="history-del" @click.stop="delRecent(d)" title="移除"><Close /></el-icon></div>
@@ -353,7 +361,7 @@
 
             <div class="log-panel">
               <div class="log-toolbar">
-                <span class="left"><span class="dots"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></span>StcGal 输出 <span style="color:var(--text-dim);font-weight:400;">({{ logLines.length }})</span></span>
+                <span class="left"><span class="dots"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></span>StcGal 输出 <span style="color:var(--text-dim);font-weight:400;"><LogLineCount /></span></span>
                 <span class="right">
                   <span @click="reverse = !reverse"><el-icon><Sort /></el-icon>{{ reverse ? '倒序' : '正序' }}</span>
                   <span @click="showTs = !showTs"><el-icon><Clock /></el-icon>{{ showTs ? '隐藏时间' : '显示时间' }}</span>
@@ -361,10 +369,7 @@
                   <span @click="autoScroll = !autoScroll"><el-icon><component :is="autoScroll ? 'Bottom' : 'Minus'" /></el-icon>{{ autoScroll ? '自动滚动' : '已暂停' }}</span>
                 </span>
               </div>
-              <div class="log-content" ref="logBox">
-                <div v-for="line in displayLines" :key="line.id" class="log-line" :class="line.type"><span class="ts" v-if="showTs">{{ line.ts }}</span><span class="msg">{{ line.text }}</span></div>
-                <div v-if="logLines.length === 0" class="log-empty"><div class="big">⌁</div>等待 StcGal 操作…</div>
-              </div>
+              <LogPanel v-if="tool === 'stc51'" pane="stc51" empty="等待 StcGal 操作…" />
             </div>
           </div>
         </div>
@@ -519,7 +524,7 @@
 
             <div class="log-panel">
               <div class="log-toolbar">
-                <span class="left"><span class="dots"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></span>ESP32 输出 <span style="color:var(--text-dim);font-weight:400;">({{ logLines.length }})</span></span>
+                <span class="left"><span class="dots"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></span>ESP32 输出 <span style="color:var(--text-dim);font-weight:400;"><LogLineCount /></span></span>
                 <span class="right">
                   <span @click="reverse = !reverse"><el-icon><Sort /></el-icon>{{ reverse ? '倒序' : '正序' }}</span>
                   <span @click="showTs = !showTs"><el-icon><Clock /></el-icon>{{ showTs ? '隐藏时间' : '显示时间' }}</span>
@@ -527,10 +532,7 @@
                   <span @click="autoScroll = !autoScroll"><el-icon><component :is="autoScroll ? 'Bottom' : 'Minus'" /></el-icon>{{ autoScroll ? '自动滚动' : '已暂停' }}</span>
                 </span>
               </div>
-              <div class="log-content" ref="logBox">
-                <div v-for="line in displayLines" :key="line.id" class="log-line" :class="line.type"><span class="ts" v-if="showTs">{{ line.ts }}</span><span class="msg">{{ line.text }}</span></div>
-                <div v-if="logLines.length === 0" class="log-empty"><div class="big">⌁</div>等待 ESP32 操作…</div>
-              </div>
+              <LogPanel v-if="tool === 'esp32'" pane="esp32" empty="等待 ESP32 操作…" />
             </div>
           </div>
         </div>
@@ -664,7 +666,7 @@
               </div>
               <div v-if="ramLog.notice" class="ram-notice">{{ ramLog.notice }}</div>
               <div v-if="ramLog.error" class="ram-error">{{ ramLog.error }}</div>
-              <pre ref="ramLogBox" class="ram-log">{{ ramLog.text || '等待读取 RAM 日志。请确认固件已在同一基地址放置 RLOG 结构。' }}</pre>
+              <RamLogText />
             </div>
             <div class="ram-card ram-contract">
               <div class="hw-card-h"><el-icon><Document /></el-icon><span>固件端结构约定</span></div>
@@ -787,16 +789,7 @@
                 <span class="tb-toggle" @click="clearTerm"><el-icon><Delete /></el-icon>清空</span>
                 <span class="tb-toggle" @click="copyTerm"><el-icon><CopyDocument /></el-icon>复制</span>
               </div>
-              <div class="term-content" ref="termBox">
-                <div v-for="ln in serialLines" :key="ln.id" class="s-line" :class="[ln.dir, ln.level, { continuation: ln.continuation }]">
-                  <span class="s-meta">
-                    <span class="ts" v-if="serial.timestamp">[{{ ln.ts }}]</span>
-                    <span class="s-badge">{{ ln.badge }}</span>
-                  </span>
-                  <span class="msg">{{ ln.text }}</span>
-                </div>
-                <div v-if="serialLines.length === 0" class="term-empty"><div class="big">⇄</div>暂无收发记录<br>连接串口后开始通信</div>
-              </div>
+              <SerialTerminal />
             </div>
 
             <div class="send-bar">
@@ -809,7 +802,7 @@
               </div>
             </div>
             <div class="stat-row">
-              <span>Tx {{ serial.tx }} 字节</span><span>Rx {{ serial.rx }} 字节</span>
+              <SerialByteStats />
               <span class="sep"></span>
               <span>{{ serial.connected ? (serial.baudRate + ' / ' + serial.dataBits + (serial.parity==='none'?'N':serial.parity==='even'?'E':'O') + serial.stopBits) : '—' }}</span>
             </div>
@@ -932,31 +925,18 @@
               <!-- 消息流 + 发布 -->
               <div class="mx-chat">
                 <div class="mx-chat-bar">
-                  <span class="tb-toggle" :class="{ on: activeConn.rxHex }" @click="activeConn.rxHex = !activeConn.rxHex">接收 HEX</span>
-                  <span class="tb-toggle" :class="{ on: activeConn.autoScroll }" @click="activeConn.autoScroll = !activeConn.autoScroll">自动滚动</span>
-                  <span class="tb-toggle" :class="{ on: activeConn.timestamp }" @click="activeConn.timestamp = !activeConn.timestamp">时间戳</span>
+                  <span class="tb-toggle" :class="{ on: activeConn.rxHex }" @click="activeConn.rxHex = !activeConn.rxHex" title="以十六进制显示接收内容">接收 HEX</span>
+                  <span class="tb-toggle" :class="{ on: activeConn.autoScroll }" @click="activeConn.autoScroll = !activeConn.autoScroll" :title="activeConn.autoScroll ? '关闭自动滚动' : '开启自动滚动'">
+                    <el-icon><component :is="activeConn.autoScroll ? 'Bottom' : 'Minus'" /></el-icon>{{ activeConn.autoScroll ? '自动滚动' : '已暂停' }}
+                  </span>
+                  <span class="tb-toggle" :class="{ on: activeConn.timestamp }" @click="activeConn.timestamp = !activeConn.timestamp" :title="activeConn.timestamp ? '隐藏时间戳' : '显示时间戳'">
+                    <el-icon><Clock /></el-icon>{{ activeConn.timestamp ? '时间戳' : '隐藏时间' }}
+                  </span>
                   <span class="spacer"></span>
-                  <span class="tb-toggle" @click="clearMqtt"><el-icon><Delete /></el-icon>清空</span>
+                  <MqttMsgCount />
+                  <span class="tb-toggle" @click="clearMqtt" title="清空当前连接消息"><el-icon><Delete /></el-icon>清空</span>
                 </div>
-                <div class="mx-msgs" ref="mqttBox">
-                  <template v-for="m in activeConn.messages" :key="m.id">
-                    <div v-if="m.dir === 'sys'" class="mx-sys">{{ m.ts }} · {{ m.text }}</div>
-                    <div v-else class="mx-row" :class="m.dir">
-                      <div class="mx-bubble" :class="m.dir" :style="{ '--mxc': m.color || '#94a3b8' }">
-                        <div class="mx-bubble-head">
-                          <span class="mx-b-dir">{{ m.dir === 'rx' ? '收' : '发' }}</span>
-                          <span class="mx-b-topic">{{ m.topic }}</span>
-                          <span v-if="m.json" class="mx-b-json">JSON</span>
-                          <span class="mx-b-meta">{{ m.meta }}</span>
-                        </div>
-                        <div v-if="m.json" class="mx-b-payload json" v-html="m.html"></div>
-                        <div v-else class="mx-b-payload">{{ m.text }}</div>
-                        <div class="mx-b-time" v-if="activeConn.timestamp">{{ m.ts }}</div>
-                      </div>
-                    </div>
-                  </template>
-                  <div v-if="activeConn.messages.length === 0" class="term-empty"><div class="big">⇄</div>暂无消息<br>连接并订阅后显示</div>
-                </div>
+                <MqttMessages />
                 <div class="mx-pub">
                   <div class="mx-pub-row">
                     <el-input v-model="activeConn.pubTopic" size="small" placeholder="发布主题，如 test/topic">
@@ -1331,7 +1311,7 @@
 </template>
 
 <script>
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, provide } from 'vue';
 // ElMessage / ElMessageBox 由 unplugin-auto-import + ElementPlusResolver 自动注入（含样式）
 // 图标按需引入：仅 import 模板返回用到的图标（其余 PascalCase/动态 :is 图标由 main.js 全局注册）
 import {
@@ -1354,8 +1334,18 @@ import { useHardwareDebug } from './composables/useHardwareDebug.js';
 import { useRamLog } from './composables/useRamLog.js';
 import { useFirmwareAnalysis } from './composables/useFirmwareAnalysis.js';
 import { useUpdate } from './composables/useUpdate.js';
+// 高频列表叶子组件：各自 inject 状态，隔离重渲染域（见 ./components/*）
+import LogPanel from './components/LogPanel.vue';
+import SerialTerminal from './components/SerialTerminal.vue';
+import MqttMessages from './components/MqttMessages.vue';
+import RamLogText from './components/RamLogText.vue';
+import LogLineCount from './components/LogLineCount.vue';
+import SerialByteStats from './components/SerialByteStats.vue';
+import LogClearBtn from './components/LogClearBtn.vue';
+import MqttMsgCount from './components/MqttMsgCount.vue';
 
 export default {
+  components: { LogPanel, SerialTerminal, MqttMessages, RamLogText, LogLineCount, SerialByteStats, LogClearBtn, MqttMsgCount },
   setup() {
     /* ════ 应用外壳：工具切换 / 侧边栏 / 关于 ════ */
     const tool = ref('flash');
@@ -1380,6 +1370,12 @@ export default {
     const ramlog = useRamLog({ settings });
     const firmware = useFirmwareAnalysis({ appendLog: log.appendLog, flash });
     const update = useUpdate();
+
+    // 叶子组件 inject：把高频状态树提供出去，子组件订阅自身依赖即可，App 主模板不再为每批数据 diff
+    provide('log', log);
+    provide('serial', serial);
+    provide('mqtt', mqtt);
+    provide('ramlog', ramlog);
 
     onMounted(() => {
       try { navCollapsed.value = localStorage.getItem('nav-collapsed') === '1'; } catch (e) {}

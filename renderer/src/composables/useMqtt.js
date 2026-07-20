@@ -1,4 +1,4 @@
-import { ref, reactive, computed, nextTick, onMounted } from 'vue';
+import { ref, reactive, computed, nextTick, onMounted, markRaw } from 'vue';
 import { highlightJson, fmtPayload, topicMatch, bytesToHex, hexToBytes, now } from '../util.js';
 
 // MQTT 调试（MQTTX 风格 · 多连接）：连接/订阅/发布 + 消息流，按连接 id 路由后端推送
@@ -21,7 +21,7 @@ export function useMqtt() {
       clean: init.clean !== false,
       subs: Array.isArray(init.subs) ? init.subs.map((s) => ({ topic: s.topic, qos: Number(s.qos) || 0, color: s.color || nextMqttColor(), active: s.active !== false })) : [],
       connected: false, connecting: false,
-      messages: Array.isArray(init.messages) ? init.messages.map((m) => ({ id: m.id || 0, dir: m.dir, text: m.text || '', html: m.json ? highlightJson(m.text || '') : '', topic: m.topic || '', meta: m.meta || '', color: m.color || '', json: !!m.json, ts: m.ts || '' })) : [],
+      messages: Array.isArray(init.messages) ? init.messages.map((m) => markRaw({ id: m.id || 0, dir: m.dir, text: m.text || '', html: m.json ? highlightJson(m.text || '') : '', topic: m.topic || '', meta: m.meta || '', color: m.color || '', json: !!m.json, ts: m.ts || '' })) : [],
       seq: (Array.isArray(init.messages) && init.messages.length) ? Math.max.apply(null, init.messages.map((m) => m.id || 0)) : 0,
       pubTopic: init.pubTopic || '', pubQos: init.pubQos != null ? Number(init.pubQos) : 0,
       pubRetain: !!init.pubRetain, pubHex: !!init.pubHex, pubSub: !!init.pubSub, pubText: '',
@@ -37,29 +37,42 @@ export function useMqtt() {
   function connById(id) { return mqttConns.value.find((c) => c.id === id) || null; }
 
   function mqttScroll() { nextTick(() => { const el = mqttBox.value; const c = activeConn.value; if (el && c && c.autoScroll) el.scrollTop = el.scrollHeight; }); }
+  // 只落数据不触发滚动/持久化（批量接收时由调用方统一做一次）；
+  // 消息对象入列后字段不再变化，markRaw 避免 3000 条消息被逐个深度代理
+  function pushMsg(conn, dir, text, topic, meta, color, json) {
+    conn.messages.push(markRaw({ id: ++conn.seq, dir, text: text || '', html: json ? highlightJson(text || '') : '', topic: topic || '', meta: meta || '', color: color || '', json: !!json, ts: now() }));
+    if (conn.messages.length > 3000) conn.messages.splice(0, 800);
+  }
   function addMsg(conn, dir, text, topic, meta, color, json) {
     if (!conn) return;
-    conn.messages.push({ id: ++conn.seq, dir, text: text || '', html: json ? highlightJson(text || '') : '', topic: topic || '', meta: meta || '', color: color || '', json: !!json, ts: now() });
-    if (conn.messages.length > 3000) conn.messages.splice(0, 800);
+    pushMsg(conn, dir, text, topic, meta, color, json);
     if (conn === activeConn.value) mqttScroll();
     persistMqtt();
   }
   function clearMqtt() { if (activeConn.value) { activeConn.value.messages = []; persistMqtt(); } }
   function subColorFor(conn, topic) { const s = conn.subs.find((x) => x.active !== false && topicMatch(x.topic, topic)); return s ? s.color : '#94a3b8'; }
 
+  // 防抖 + 最大等待：纯尾沿防抖在持续消息流（间隔 <400ms）下会被不断重置、一直存不上；
+  // 改为静默 400ms 后落盘，且从首次请求起最迟 3s 强制落一次，避免高频流量下反复重写 config.json
   let mqttSaveT = null;
+  let mqttSaveFirstReq = 0;
+  function doPersistMqtt() {
+    mqttSaveT = null;
+    mqttSaveFirstReq = 0;
+    const data = mqttConns.value.map((c) => ({
+      id: c.id, name: c.name, url: c.url, clientId: c.clientId, username: c.username, password: c.password,
+      keepalive: c.keepalive, clean: c.clean,
+      subs: c.subs.map((s) => ({ topic: s.topic, qos: s.qos, color: s.color, active: s.active !== false })),
+      pubTopic: c.pubTopic, pubQos: c.pubQos, pubRetain: c.pubRetain, pubHex: c.pubHex, pubSub: c.pubSub, rxHex: c.rxHex,
+      messages: c.messages.slice(-500).map((m) => ({ id: m.id, dir: m.dir, text: m.text, topic: m.topic, meta: m.meta, color: m.color, json: m.json, ts: m.ts }))
+    }));
+    window.api.saveConfig({ mqttConns: data }).catch(() => {});
+  }
   function persistMqtt() {
+    const t = Date.now();
+    if (!mqttSaveFirstReq) mqttSaveFirstReq = t;
     clearTimeout(mqttSaveT);
-    mqttSaveT = setTimeout(() => {
-      const data = mqttConns.value.map((c) => ({
-        id: c.id, name: c.name, url: c.url, clientId: c.clientId, username: c.username, password: c.password,
-        keepalive: c.keepalive, clean: c.clean,
-        subs: c.subs.map((s) => ({ topic: s.topic, qos: s.qos, color: s.color, active: s.active !== false })),
-        pubTopic: c.pubTopic, pubQos: c.pubQos, pubRetain: c.pubRetain, pubHex: c.pubHex, pubSub: c.pubSub, rxHex: c.rxHex,
-        messages: c.messages.slice(-500).map((m) => ({ id: m.id, dir: m.dir, text: m.text, topic: m.topic, meta: m.meta, color: m.color, json: m.json, ts: m.ts }))
-      }));
-      window.api.saveConfig({ mqttConns: data }).catch(() => {});
-    }, 400);
+    mqttSaveT = setTimeout(doPersistMqtt, Math.min(400, Math.max(0, mqttSaveFirstReq + 3000 - t)));
   }
   function selectConn(c) { activeConnId.value = c.id; mqttScroll(); }
   function openConnDlg(c) {
@@ -214,14 +227,24 @@ export function useMqtt() {
       else if (s.state === 'closed') { if (c.connected || c.connecting) addMsg(c, 'sys', '连接已关闭'); c.connected = false; c.connecting = false; }
       else if (s.state === 'error') { addMsg(c, 'sys', '错误: ' + (s.error || '')); }
     });
-    window.api.onMqttMessage((m) => {
-      if (!m) return;
-      const c = connById(m.id);
-      if (!c) return;
-      const u8 = Uint8Array.from(m.payload || []);
-      const raw = c.rxHex ? bytesToHex(u8) : new TextDecoder().decode(u8);
-      const fp = fmtPayload(raw, c.rxHex);
-      addMsg(c, 'rx', fp.text, m.topic, 'QoS' + (m.qos || 0) + (m.retain ? ' ·R' : ''), subColorFor(c, m.topic), fp.json);
+    // 消息批量接收（主进程按 30ms 攒批推送数组；兼容单条对象），
+    // 一批只滚动/持久化一次；TextDecoder 模块内复用
+    const rxDecoder = new TextDecoder();
+    window.api.onMqttMessage((data) => {
+      const batch = Array.isArray(data) ? data : (data ? [data] : []);
+      if (!batch.length) return;
+      let touchedActive = false;
+      for (const m of batch) {
+        const c = connById(m.id);
+        if (!c) continue;
+        const u8 = m.payload instanceof Uint8Array ? m.payload : Uint8Array.from(m.payload || []);
+        const raw = c.rxHex ? bytesToHex(u8) : rxDecoder.decode(u8);
+        const fp = fmtPayload(raw, c.rxHex);
+        pushMsg(c, 'rx', fp.text, m.topic, 'QoS' + (m.qos || 0) + (m.retain ? ' ·R' : ''), subColorFor(c, m.topic), fp.json);
+        if (c === activeConn.value) touchedActive = true;
+      }
+      if (touchedActive) mqttScroll();
+      persistMqtt();
     });
   });
 

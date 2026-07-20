@@ -101,18 +101,20 @@ function findRepositoryStartupTemplate(filename, options = {}) {
   return null;
 }
 
-function findFile(root, filename, prefer) {
+// 有限深度 BFS：Cube 固件包内启动文件模板最深约 9 层（Repository/包名/Drivers/.../Templates/gcc/），
+// 不设上限时会把整个数万文件的固件仓库同步扫完、阻塞主进程
+function findFile(root, filename, prefer, maxDepth = 12) {
   if (!root || !fs.existsSync(root)) return null;
-  const queue = [root];
+  const queue = [{ dir: root, d: 0 }];
   let fallback = null;
   while (queue.length) {
-    const dir = queue.shift();
+    const { dir, d } = queue.shift();
     let entries;
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
     for (const e of entries) {
       const p = path.join(dir, e.name);
       if (e.isDirectory()) {
-        if (!e.name.startsWith('.') && e.name !== 'node_modules') queue.push(p);
+        if (d < maxDepth && !e.name.startsWith('.') && e.name !== 'node_modules') queue.push({ dir: p, d: d + 1 });
       } else if (e.isFile() && e.name.toLowerCase() === filename.toLowerCase()) {
         if (!fallback) fallback = p;
         if (!prefer || prefer(p)) return p;

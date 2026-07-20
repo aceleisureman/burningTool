@@ -7,6 +7,19 @@ const { effectivePaths, findExecutableOnPath } = require('../toolchain/toolchain
 const FLASH_SECTIONS = new Set(['.isr_vector', '.text', '.rodata', '.init', '.fini', '.ARM.extab', '.ARM.exidx']);
 const RAM_SECTIONS = new Set(['.data', '.bss', '.noinit', '.ramfunc', '.ccmram']);
 
+// 取 mtime 最新的文件：statSync 不能写进 sort 比较器（每次比较两次系统调用，
+// O(n log n) 次 stat 在 Windows/NTFS 上明显拖慢），这里每个文件只 stat 一次
+function newestByMtime(files) {
+  let best = '';
+  let bestM = -Infinity;
+  for (const p of files) {
+    let m;
+    try { m = fs.statSync(p).mtimeMs; } catch { continue; }
+    if (m > bestM) { bestM = m; best = p; }
+  }
+  return best;
+}
+
 function findFirmwareFile(projectDir, explicitName) {
   if (!projectDir || !fs.existsSync(projectDir)) return '';
   const exts = new Set(['.elf', '.axf']);
@@ -30,8 +43,7 @@ function findFirmwareFile(projectDir, explicitName) {
     }
   }
   if (!found.length) return '';
-  found.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
-  return found[0];
+  return newestByMtime(found) || found[0];
 }
 
 function findMapFile(projectDir, firmware) {
@@ -52,8 +64,7 @@ function findMapFile(projectDir, firmware) {
       if (e.isDirectory() && d < 4 && e.name !== 'node_modules' && !e.name.startsWith('.')) stack.push({ dir: p, d: d + 1 });
     }
   }
-  found.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
-  return found[0] || '';
+  return newestByMtime(found) || found[0] || '';
 }
 
 function resolveBinutil(cfg, name) {

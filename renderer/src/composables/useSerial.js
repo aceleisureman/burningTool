@@ -100,7 +100,6 @@ export function useSerial() {
   }
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, Math.max(0, ms | 0)));
-  function termScroll() { nextTick(() => { const el = termBox.value; if (el && serial.autoScroll) el.scrollTop = el.scrollHeight; }); }
   function serialNow() {
     const d = new Date();
     const p = (n, w = 2) => String(n).padStart(w, '0');
@@ -125,27 +124,41 @@ export function useSerial() {
     return meta;
   }
   function pushTermLine(dir, text) {
+    // 行对象写入后字段不再变化，用普通对象即可；ref 数组本身负责触发更新
     serialLines.value.push({ id: ++serialSeq, dir, text: String(text ?? ''), ts: serialNow(), ...serialLineMeta(dir, text) });
     if (serialLines.value.length > 3000) serialLines.value.splice(0, 800);
   }
   function addTerm(dir, text) {
+    // 系统/发送消息一次性多行时也只滚动一次
     String(text ?? '').replace(/\r/g, '').split('\n').forEach((line) => pushTermLine(dir, line));
-    termScroll();
+    scheduleTermScroll();
   }
   function flushRxBuffer() {
     if (!rxTextBuffer) return;
     pushTermLine('rx', rxTextBuffer);
     rxTextBuffer = '';
-    termScroll();
+    scheduleTermScroll();
   }
+  // 主进程已 30ms 攒批，渲染端再合并滚动：同一帧内多次 addRx 只 nextTick 一次
+  let scrollPending = false;
+  function scheduleTermScroll() {
+    if (!serial.autoScroll || scrollPending) return;
+    scrollPending = true;
+    nextTick(() => {
+      scrollPending = false;
+      const el = termBox.value;
+      if (el && serial.autoScroll) el.scrollTop = el.scrollHeight;
+    });
+  }
+  function termScroll() { scheduleTermScroll(); }
   function addRxText(text) {
     clearTimeout(rxFlushTimer);
     rxTextBuffer += String(text || '').replace(/\r/g, '');
     const parts = rxTextBuffer.split('\n');
     rxTextBuffer = parts.pop() || '';
-    parts.forEach((line) => pushTermLine('rx', line));
+    for (const line of parts) pushTermLine('rx', line);
     rxFlushTimer = setTimeout(flushRxBuffer, 120);
-    termScroll();
+    scheduleTermScroll();
   }
   function resetRxTextState() {
     rxTextBuffer = '';
@@ -274,9 +287,9 @@ export function useSerial() {
   }
 
   onMounted(() => {
-    // 串口数据/关闭/错误（serialport 后端推送）
+    // 串口数据/关闭/错误（serialport 后端推送，主进程已按 30ms 攒批合并）
     window.api.onSerialData((arr) => {
-      const u8 = Uint8Array.from(arr || []);
+      const u8 = arr instanceof Uint8Array ? arr : Uint8Array.from(arr || []);
       if (!u8.length) return;
       serial.rx += u8.length;
       if (serial.rxHex) addTerm('rx', bytesToHex(u8));

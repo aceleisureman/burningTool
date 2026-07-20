@@ -3,8 +3,8 @@ import { createApp } from 'vue';
 import {
   Aim, Bottom, CaretRight, CircleCheck, CircleClose, Clock, Close, Connection,
   CopyDocument, Cpu, Delete, Download, EditPen, Expand, Fold, FolderOpened, Grid,
-  InfoFilled, MagicStick, Minus, Monitor, Moon, Plus, Promotion, RefreshRight,
-  Setting, Sort, Sunny, SwitchButton, Tickets, Upload, VideoPause, VideoPlay,
+  Hide, InfoFilled, MagicStick, Minus, Monitor, Moon, Plus, Promotion, RefreshRight,
+  Setting, Sort, Sunny, SwitchButton, Tickets, Upload, VideoPause, VideoPlay, View,
   Operation, Document, DataAnalysis, DataLine,
 } from '@element-plus/icons-vue';
 
@@ -17,8 +17,8 @@ import App from './App.vue';
 const usedIcons = {
   Aim, Bottom, CaretRight, CircleCheck, CircleClose, Clock, Close, Connection,
   CopyDocument, Cpu, Delete, Download, EditPen, Expand, Fold, FolderOpened, Grid,
-  InfoFilled, MagicStick, Minus, Monitor, Moon, Plus, Promotion, RefreshRight,
-  Setting, Sort, Sunny, SwitchButton, Tickets, Upload, VideoPause, VideoPlay,
+  Hide, InfoFilled, MagicStick, Minus, Monitor, Moon, Plus, Promotion, RefreshRight,
+  Setting, Sort, Sunny, SwitchButton, Tickets, Upload, VideoPause, VideoPlay, View,
   Operation, Document, DataAnalysis, DataLine,
 };
 

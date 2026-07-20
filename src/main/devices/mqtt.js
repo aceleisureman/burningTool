@@ -18,6 +18,24 @@ function registerMqtt(ipcMain, app, push) {
   const pushMqtt = typeof push === 'function' ? push : (() => {});
   app.on('before-quit', () => { for (const id of Array.from(mqttClients.keys())) mqttCloseId(id); });
 
+  // 攒批推送：高频主题（传感器等）每条消息一次 IPC 会拖垮渲染端，
+  // 合并 30ms 窗口内的消息成数组一次推送（'mqtt-message' 通道现在承载数组），
+  // payload 直接传 Uint8Array 避免 Array.from 普通数组的结构化克隆开销。
+  let msgQueue = [];
+  let msgTimer = null;
+  const flushMessages = () => {
+    if (msgTimer) { clearTimeout(msgTimer); msgTimer = null; }
+    if (!msgQueue.length) return;
+    const batch = msgQueue;
+    msgQueue = [];
+    pushMqtt('mqtt-message', batch);
+  };
+  const queueMessage = (m) => {
+    msgQueue.push(m);
+    if (msgQueue.length >= 500) flushMessages();   // 极端流量下按条数提前刷，限制驻留内存
+    else if (!msgTimer) msgTimer = setTimeout(flushMessages, 30);
+  };
+
   ipcMain.handle('mqtt-connect', async (_e, opts) => {
     const M = loadMqtt();
     if (!M) return { ok: false, error: 'mqtt 未安装（请在工程目录执行 npm install mqtt）' };
@@ -45,10 +63,10 @@ function registerMqtt(ipcMain, app, push) {
       client.on('offline', () => pushMqtt('mqtt-status', { id, state: 'offline' }));
       client.on('error', (err) => pushMqtt('mqtt-status', { id, state: 'error', error: err && err.message ? err.message : String(err) }));
       client.on('message', (topic, payload, packet) => {
-        pushMqtt('mqtt-message', {
+        queueMessage({
           id,
           topic,
-          payload: Array.from(payload || []),
+          payload: new Uint8Array(payload || 0),
           qos: packet ? packet.qos : 0,
           retain: packet ? !!packet.retain : false,
           ts: Date.now()
