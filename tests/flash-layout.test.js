@@ -17,37 +17,35 @@ test('sidebar keeps product names for STC and ESP32 while other labels use four 
   for (const label of labels.filter((_, index) => index !== 1 && index !== 2)) assert.match(label, /^[\u4e00-\u9fff]{4}$/);
 });
 
-test('flash page puts command toolbar above project, quick settings and terminal', () => {
+test('flash page puts command toolbar above project and terminal', () => {
   const projectIndex = viewSource.indexOf('class="ops-section ops-project"');
   const commandIndex = viewSource.indexOf('class="ops-section ops-actions"');
-  const settingsIndex = viewSource.indexOf('class="ops-section ops-utility"');
   const terminalIndex = viewSource.indexOf('class="log-panel"');
 
   assert.ok(commandIndex >= 0);
+  assert.ok(projectIndex >= 0);
+  assert.ok(terminalIndex >= 0);
   assert.ok(commandIndex < projectIndex);
-  assert.ok(projectIndex < settingsIndex);
-  assert.ok(settingsIndex < terminalIndex);
+  assert.ok(projectIndex < terminalIndex);
 });
 
 test('flash page presents icon-based commands, quick tools and flash methods', () => {
-  assert.match(viewSource, /class="action-command-grid"/);
+  assert.match(viewSource, /class="action-bar"/);
+  assert.match(viewSource, /class="action-group action-group-main"/);
   assert.match(viewSource, /class="command-button command-build"/);
   assert.match(viewSource, /class="command-button command-flash"/);
   assert.match(viewSource, /class="command-button command-primary"/);
-  assert.equal((viewSource.match(/class="command-icon"/g) || []).length, 3);
-  assert.match(viewSource, /class="utility-panel quick-tools"/);
+  assert.equal((viewSource.match(/class="command-glyph command-glyph-/g) || []).length, 3);
   assert.ok((viewSource.match(/class="tool-icon-button/g) || []).length >= 3);
   assert.match(viewSource, /class="method-icon-group"/);
   assert.ok((viewSource.match(/class="method-icon-choice"/g) || []).length >= 2);
-  assert.match(viewSource, /class="utility-panel flash-method"/);
 
-  assert.match(styles, /\.action-command-grid\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s);
-  assert.match(styles, /\.action-command-grid \.command-button\.el-button\s*\{[^}]*height:\s*64px/s);
-  assert.match(styles, /\.command-icon\s*\{[^}]*font-size:\s*22px/s);
-  assert.match(styles, /\.command-flash\.el-button\s*\{[^}]*linear-gradient/s);
-  assert.match(styles, /\.tool-icon-button\.el-button\s*\{[^}]*height:\s*52px/s);
-  assert.match(styles, /\.method-icon-group\s*\{[^}]*display:\s*grid/s);
-  assert.match(styles, /\.ops-utility\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s);
+  assert.match(styles, /\.action-bar\s*\{[^}]*display:\s*flex/s);
+  assert.match(styles, /\.action-group-main \.command-button\.el-button\s*\{[^}]*width:\s*48px/s);
+  assert.match(styles, /\.action-group-main \.command-button\.el-button\s*\{[^}]*height:\s*48px/s);
+  assert.match(styles, /\.tool-icon-button\.el-button\s*\{[^}]*height:\s*40px/s);
+  assert.match(styles, /\.method-icon-group\s*\{[^}]*display:\s*inline-flex/s);
+  assert.match(styles, /\.ops-actions\s*\{[^}]*grid-template-columns:\s*170px\s+minmax\(0,\s*1fr\)/s);
   assert.match(styles, /@media\s*\(max-width:\s*900px\)/);
 });
 

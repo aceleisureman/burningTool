@@ -13,6 +13,7 @@ export default [
       'tools/**',
       'renderer/auto-imports.d.ts',
       'renderer/components.d.ts',
+      'vite.config.mjs.timestamp-*.mjs',
     ],
   },
   js.configs.recommended,

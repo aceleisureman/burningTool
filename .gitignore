@@ -36,3 +36,6 @@ install_out.txt
 
 # 图标全幅原稿备份（仅本地）
 assets/icons/_fullbleed_backup/
+
+# Vite-generated temporary config snapshots
+vite.config.mjs.timestamp-*.mjs
