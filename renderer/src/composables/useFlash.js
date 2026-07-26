@@ -2,12 +2,11 @@ import { ref, computed, watch } from 'vue';
 import { baseName } from '../util.js';
 
 // 烧录工具：工程识别 + 编译/烧录/一键 + 芯片探测 + 历史项目
-// deps: { log:{appendLog,lastResult}, settings:{config}, appShell:{tool} }
+// deps: { log:{appendLog,lastResult}, settings:{config} }
 export function useFlash(deps) {
-  const { log, settings, appShell } = deps;
+  const { log, settings } = deps;
   const { appendLog, lastResult } = log;
   const config = settings.config;
-  const tool = appShell.tool;
 
   const projectDir = ref('');
   const hasMakefile = ref(false);

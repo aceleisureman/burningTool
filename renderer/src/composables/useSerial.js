@@ -70,7 +70,7 @@ export function useSerial() {
       const i = cmdGroups.value.findIndex((x) => x.id === g.id);
       if (i >= 0) cmdGroups.value.splice(i, 1);
       if (activeGid.value === g.id) activeGid.value = cmdGroups.value[0].id;
-    } catch (e) {}
+    } catch (_e) {}
   }
 
   // 持久化到 config.json（防抖）
@@ -79,7 +79,7 @@ export function useSerial() {
   function persistQuickCmds() { clearTimeout(qcSaveT); qcSaveT = setTimeout(() => { window.api.saveConfig({ serialCmdGroups: plainGroups() }).catch(() => {}); }, 400); }
   async function exportQuickCmds() {
     try { const r = await window.api.exportQuickCmds(plainGroups()); if (r && r.ok) ElMessage.success('已导出: ' + r.path); else if (r && r.error) ElMessage.error('导出失败: ' + r.error); }
-    catch (e) { ElMessage.error('导出失败'); }
+    catch (_e) { ElMessage.error('导出失败'); }
   }
   async function importQuickCmds() {
     try {
@@ -96,7 +96,7 @@ export function useSerial() {
       if (!cmdGroups.value.length) cmdGroups.value = [normGroup({ name: '默认', cmds: [] })];
       activeGid.value = cmdGroups.value[0].id;
       ElMessage.success('已导入 ' + cmdGroups.value.length + ' 个分组');
-    } catch (e) { ElMessage.error('导入失败'); }
+    } catch (_e) { ElMessage.error('导入失败'); }
   }
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, Math.max(0, ms | 0)));
@@ -150,7 +150,6 @@ export function useSerial() {
       if (el && serial.autoScroll) el.scrollTop = el.scrollHeight;
     });
   }
-  function termScroll() { scheduleTermScroll(); }
   function addRxText(text) {
     clearTimeout(rxFlushTimer);
     rxTextBuffer += String(text || '').replace(/\r/g, '');

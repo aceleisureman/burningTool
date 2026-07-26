@@ -298,7 +298,7 @@ export default {
     const navCollapsed = ref(false);
     const aboutVisible = ref(false);
     const appVersion = ref('1.0.0');
-    function toggleNav() { navCollapsed.value = !navCollapsed.value; try { localStorage.setItem('nav-collapsed', navCollapsed.value ? '1' : '0'); } catch (e) {} }
+    function toggleNav() { navCollapsed.value = !navCollapsed.value; try { localStorage.setItem('nav-collapsed', navCollapsed.value ? '1' : '0'); } catch (_e) {} }
     const appShell = { tool, prevTool };
 
     /* ════ 各域组合式（依赖显式注入：日志/配置/工具切换为跨域共享） ════ */
@@ -324,7 +324,7 @@ export default {
     provide('ramlog', ramlog);
 
     onMounted(() => {
-      try { navCollapsed.value = localStorage.getItem('nav-collapsed') === '1'; } catch (e) {}
+      try { navCollapsed.value = localStorage.getItem('nav-collapsed') === '1'; } catch (_e) {}
       // loadConfig 读取配置后再分发给串口/ MQTT 域（见 useSettings.loadConfig）
       settings.loadConfig().then(() => ramlog.applyRamLogConfig(settings.config.ramLogConfig));
       settings.checkEnv(); flash.loadRecent(); settings.refreshDefaultTc();

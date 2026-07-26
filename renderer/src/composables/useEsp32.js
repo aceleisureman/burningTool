@@ -254,7 +254,7 @@ export function useEsp32(deps = {}) {
           parts: esp32.parts.map((p) => ({ offset: p.offset, path: p.path }))
         }
       }).catch(() => {});
-    } catch (e) {}
+    } catch (_e) {}
   }
 
   async function initEsp32FromConfig() {
@@ -279,7 +279,7 @@ export function useEsp32(deps = {}) {
           ? saved.parts.map((p) => ({ offset: p.offset || '0x0', path: p.path || '', name: p.path ? baseName(p.path) : '', size: 0 }))
           : []
       });
-    } catch (e) {}
+    } catch (_e) {}
   }
 
   onMounted(() => {

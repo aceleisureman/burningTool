@@ -39,7 +39,7 @@ export function useGlyph() {
     const glyphs = [], blocks = [];
     chars.forEach((ch) => {
       if (ch === '\n' || ch === '\r') return;
-      let grid; try { grid = rasterChar(ch, gl.size, gl.font, gl.bold, gl.threshold, gl.offX, gl.offY); } catch (e) { grid = null; }
+      let grid; try { grid = rasterChar(ch, gl.size, gl.font, gl.bold, gl.threshold, gl.offX, gl.offY); } catch (_e) { grid = null; }
       if (!grid) return;
       const bytes = bytesFromGrid(grid, gl.size, gl.scan, gl.msb, gl.negative);
       glyphs.push({ ch, grid, bytes });
@@ -77,7 +77,7 @@ export function useGlyph() {
   async function copyGlyph() {
     if (!gl.output) return;
     try { await copyText(gl.output); ElMessage.success('已复制字模代码'); }
-    catch (e) { ElMessage.error('复制失败'); }
+    catch (_e) { ElMessage.error('复制失败'); }
   }
   function downloadGlyph() {
     if (!gl.output) return;
