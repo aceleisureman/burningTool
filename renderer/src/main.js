@@ -10,7 +10,17 @@ import {
 
 // 组件与其样式经 unplugin 按需注入（见 vite.config.mjs）；此处仅引入暗色 css 变量与自定义样式
 import 'element-plus/theme-chalk/dark/css-vars.css';
-import '../styles.css';
+import './styles/base.css';
+import './styles/layout.css';
+import './styles/tools/flash.css';
+import './styles/tools/serial.css';
+import './styles/tools/mqtt.css';
+import './styles/tools/hardware.css';
+import './styles/tools/ramlog.css';
+import './styles/tools/firmware.css';
+import './styles/tools/glyph.css';
+import './styles/tools/stc51-esp32.css';
+import './styles/tools/settings.css';
 
 import App from './App.vue';
 

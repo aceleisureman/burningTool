@@ -10,7 +10,23 @@ permissions:
   contents: write
 
 jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm ci
+      - name: Test, lint and build renderer
+        run: npm run check
+
   build:
+    needs: verify
     strategy:
       fail-fast: false
       matrix:
@@ -46,7 +62,7 @@ jobs:
       # 同时上传 latest.yml / latest-mac.yml / latest-linux.yml 供应用内自动更新。
       # macOS：必须产出 zip（dmg 仅给人手工安装）；当前无 Apple 开发者证书，
       # 关闭签名发现并显式 CSC_IDENTITY_AUTO_DISCOVERY=false，与 package.json mac.identity=null 一致。
-      # 应用侧 updater 已关闭 verifyUpdateCodeSignature，使未签名包也能完成 ShipIt 替换。
+      # 应用侧 macOS updater 使用 zip 下载后本地替换 .app，未签名构建不再走 ShipIt。
       - name: Build & publish
         shell: bash
         run: npx vite build && npx electron-builder ${{ matrix.args }} --publish always

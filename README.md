@@ -84,8 +84,9 @@ npm run start:prod
 ## 测试与代码检查
 
 ```bash
-npm test        # 运行 node:test 单元测试（tests/ 目录）
-npm run lint    # ESLint 代码检查
+npm test          # 运行 node:test 单元测试（tests/ 目录）
+npm run lint      # ESLint 代码检查
+npm run check     # 测试 + lint + 渲染层生产构建
 ```
 
 测试覆盖：工具链版本、flash 解析、固件分析、OpenOCD 路径、ESP32、构建系统、Makefile 启动修复、STM32 目标、平台工具链、配置、工具函数、pyOCD 诊断、硬件调试、内存日志、bus 事件等。
@@ -94,57 +95,45 @@ npm run lint    # ESLint 代码检查
 
 ## 项目结构
 
-```
+```text
 burningTool/
-├── src/main/                    # Electron 主进程（CommonJS）
-│   ├── index.js                 # 入口：单实例锁 + IPC 注册中心
-│   ├── windows.js               # 窗口管理（主窗口/悬浮窗/托盘）
-│   ├── core/
-│   │   ├── config.js            # 配置读写（config.json，平台路径隔离）
-│   │   └── bus.js                # 事件总线（日志/进度 sink 注入）
-│   ├── toolchain/
-│   │   ├── toolchain.js         # 工具链探测/安装/路径解析
-│   │   ├── platform-toolchains.js # 三平台下载包配置（win/mac/linux）
-│   │   ├── downloader.js         # 8 线程分段下载 + 镜像加速
-│   │   └── proc.js               # 通用进程执行（流式输出/超时/捕获）
-│   ├── flash/
-│   │   ├── flasher.js           # 编译烧录核心（make/Keil/pyOCD/OpenOCD）
-│   │   ├── flash-parsing.js     # DEVID 表/探针选择/输出清洗
-│   │   ├── stm32-targets.js     # pyOCD 目标规范化 + OpenOCD 配置
-│   │   ├── pyocd-diagnostics.js # 烧录失败诊断建议
-│   │   ├── openocd-paths.js     # OpenOCD 路径转义
-│   │   ├── makefile-startup-repair.js # CubeMX 工程启动文件修复
-│   │   ├── stc51.js              # STC 8051 烧录
-│   │   └── esp32.js              # ESP32 烧录
-│   ├── devices/
-│   │   ├── serial.js            # serialport 串口 IPC
-│   │   └── mqtt.js               # mqtt.js 多连接 IPC
-│   ├── firmware/analyzer.js     # 固件分析
-│   └── ramlog/ramlog.js         # 内存日志读取
-├── src/preload/index.js         # preload：contextBridge 暴露 window.api
-├── renderer/                    # Vue 3 渲染层
-│   ├── index.html               # HTML 入口
-│   ├── src/
-│   │   ├── App.vue              # 根组件（9 工具切换）
-│   │   ├── main.js              # Vue 入口
-│   │   ├── util.js              # 渲染端工具函数
-│   │   └── composables/         # 组合式函数（每工具一个）
-│   │       ├── useFlash.js      ├── useStc51.js
-│   │       ├── useEsp32.js      ├── useHardwareDebug.js
-│   │       ├── useRamLog.js     ├── useFirmwareAnalysis.js
-│   │       ├── useSerial.js     ├── useMqtt.js
-│   │       ├── useGlyph.js      ├── useSettings.js
-│   │       ├── useLog.js        └── useTheme.js
-│   └── fonts/                   # 阿里妈妈方圆体（自定义字体）
-├── assets/icons/                # 应用图标（.ico/.icns/.png/.iconset）
-├── tests/                       # node:test 单元测试
-├── scripts/                     # dev.js（HMR 启动）/ stop-electron.js
-├── resources/toolchain/         # 预置工具链（构建打包进 app）
-├── vite.config.mjs              # Vite 配置（root=renderer/）
+├── src/main/                       # Electron 主进程（CommonJS）
+│   ├── index.js                    # 生命周期、日志 sink、模块装配
+│   ├── ipc/                        # 按领域注册 IPC
+│   │   ├── register-core-ipc.js
+│   │   ├── register-toolchain-ipc.js
+│   │   ├── register-project-ipc.js
+│   │   ├── register-flash-ipc.js
+│   │   └── register-debug-ipc.js
+│   ├── toolchain/                  # 工具链领域
+│   │   ├── toolchain.js            # 兼容入口/统一导出
+│   │   ├── paths.js                # 路径与可执行文件解析
+│   │   ├── status.js               # 状态、版本、构建环境
+│   │   ├── installer.js            # 下载与安装
+│   │   └── system-path.js          # 系统 PATH 管理
+│   ├── flash/                      # 编译烧录领域
+│   │   ├── flasher.js              # 兼容入口/统一导出
+│   │   ├── probe.js                # 探针、芯片识别、硬件调试
+│   │   ├── project.js              # 工程识别与固件定位
+│   │   ├── build.js                # Makefile/Keil 编译
+│   │   └── runner.js               # pyOCD/OpenOCD/Keil 烧录
+│   ├── devices/                    # 串口、MQTT
+│   ├── firmware/                   # 固件分析
+│   └── ramlog/                     # 内存日志
+├── src/preload/index.js            # contextBridge 安全 API
+├── renderer/src/
+│   ├── App.vue                     # 根布局、页面状态装配
+│   ├── views/                      # 每个工具一个页面组件
+│   ├── composables/                # 每个领域一个状态/业务组合函数
+│   └── styles/                     # base、layout 与 tools/* 页面样式
+├── tests/                          # node:test
+├── docs/                           # 架构与结构优化说明
+├── assets/icons/                   # 应用图标
+├── scripts/                        # 开发/停止脚本
 └── package.json
 ```
 
-> **注意**：`toolchain/`、`resources/toolchain/`、`tools/`、`node_modules/`、`dist/` 是运行时生成的大体积二进制，已在 `.gitignore` 中排除，不入版本库。
+> `toolchain/`、`tools/`、`node_modules/`、`dist/`、`renderer/dist/` 均为本地依赖或生成物，不入版本库。默认工具链在运行时按平台下载；打包配置明确排除 `resources/`，仓库不再维护重复工具链副本。
 
 ---
 
@@ -167,7 +156,7 @@ burningTool/
 
 ### IPC 通道
 
-主进程在 [src/main/index.js](src/main/index.js) 注册全部 `ipcMain.handle`，串口/MQTT 各自模块化注册（`registerSerial` / `registerMqtt`）。主要通道：
+主进程入口只负责装配，[src/main/ipc/](src/main/ipc/) 按 core/toolchain/project/flash/debug 五个领域注册 `ipcMain.handle`。串口/MQTT 继续由各自设备模块注册。主要通道：
 
 | 通道 | 用途 |
 |------|------|
@@ -199,7 +188,7 @@ burningTool/
 ## 开发约定
 
 - 主进程使用 **CommonJS**（`require`），渲染层使用 **ESM**（`import`）。
-- 新增 IPC 通道：① 在 [src/preload/index.js](src/preload/index.js) 暴露 → ② 在 [src/main/index.js](src/main/index.js) 注册 `ipcMain.handle` → ③ 渲染端对应 composable 调用。
+- 新增 IPC 通道：① 在 [src/preload/index.js](src/preload/index.js) 暴露 → ② 在 [src/main/ipc/](src/main/ipc/) 对应领域 registrar 注册 → ③ 渲染端对应 composable 调用。
 - Element Plus 组件/样式**按需自动引入**，无需手动 import；新增组件直接用标签即可（`unplugin-vue-components` 自动解析）。
 - 调试探针枚举、芯片识别等耗时操作有缓存（如 `_pyocdTargetOk`），避免重复探测。
 - 字模生成编辑框默认为空，输入后实时生成点阵预览与代码。

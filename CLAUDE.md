@@ -13,6 +13,7 @@ npm start            # 开发启动（Vite HMR + Electron）
 npm run start:prod   # 正式启动（先 build 再起 Electron）
 npm test             # node:test 单元测试
 npm run lint         # ESLint
+npm run check        # 测试 + lint + 渲染构建
 npm run dist:mac-arm # 打包当前 Mac（Apple Silicon）
 npm run dist:win     # 打包 Windows
 ```
@@ -20,8 +21,8 @@ npm run dist:win     # 打包 Windows
 ## 架构要点
 
 - **主进程 CommonJS**（`src/main/`，用 `require`），**渲染层 ESM**（`renderer/src/`，用 `import`）。不要混用。
-- IPC 通道三步走：preload 暴露 → index.js 注册 `ipcMain.handle` → composable 调用。见 [src/preload/index.js](src/preload/index.js)。
-- 渲染层每个工具一个 composable（`renderer/src/composables/use*.js`），[App.vue](renderer/src/App.vue) 只做 `tool` 切换编排，业务逻辑全在 composable。
+- IPC 通道三步走：preload 暴露 → `src/main/ipc/register-*-ipc.js` 按领域注册 → composable 调用。`src/main/index.js` 只负责生命周期与装配。
+- 渲染层每个工具由 `views/*.vue` 承载界面、`composables/use*.js` 承载状态与业务；[App.vue](renderer/src/App.vue) 只做根布局、依赖装配和工具切换。
 - 日志经 [src/main/core/bus.js](src/main/core/bus.js) sink 注入，子模块复用 `bus.send()`，渲染端按 `key` 原地更新进度行。
 - 配置在 [src/main/core/config.js](src/main/core/config.js)，存 `app.getPath('userData')/config.json`，平台路径隔离（`platformPaths[platformId]`）。
 
@@ -34,7 +35,7 @@ npm run dist:win     # 打包 Windows
 
 ## 不要入版本库的目录
 
-`toolchain/`、`resources/toolchain/`、`tools/`、`node_modules/`、`dist/` —— 运行时生成的大体积二进制，`.gitignore` 已排除。
+`toolchain/`、`tools/`、`node_modules/`、`dist/`、`renderer/dist/` —— 本地依赖或运行时/构建生成物，`.gitignore` 已排除。打包配置排除 `resources/`，不要恢复重复工具链副本。
 
 ## 测试
 

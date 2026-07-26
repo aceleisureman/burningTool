@@ -1,0 +1,195 @@
+    /* 全局字体：阿里妈妈方圆体 VF */
+    @font-face {
+      font-family: "Alimama FangYuanTi VF";
+      src: url("../../fonts/AlimamaFangYuanTiVF-Thin.woff2") format("woff2");
+      font-weight: 100 900;
+      font-style: normal;
+      font-display: swap;
+    }
+    :root {
+      --radius: 12px;
+      --font-sans: "Alimama FangYuanTi VF", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      --mono: "JetBrains Mono","Cascadia Code","SFMono-Regular","Consolas",monospace;
+      --nav-w: 212px;
+    }
+    /* ── Element Plus 暗色基础变量（具体色板由 data-theme 覆盖）── */
+    html.dark {
+      --el-bg-color: var(--panel);
+      --el-bg-color-overlay: var(--panel);
+      --el-bg-color-page: var(--bg);
+      --el-fill-color-blank: var(--panel-2);
+      --el-border-color: var(--border);
+      --el-border-color-light: var(--border);
+      --el-border-color-lighter: var(--border);
+      --el-text-color-regular: var(--text-soft);
+      --el-text-color-primary: var(--text);
+      --el-text-color-secondary: var(--text-dim);
+      --el-fill-color: var(--panel-2);
+      --el-fill-color-light: var(--panel-2);
+    }
+
+    /* ── 配色方案（data-theme）── */
+    /* 1 清爽薄荷 · light */
+    html[data-theme="mint"], html.light:not([data-theme]) {
+      --bg:#eef3ee; --bg-2:#ffffff; --panel:#ffffff; --panel-2:#f4f7f4;
+      --border:#e2e8e2; --border-2:#d2dbd2;
+      --text:#1d2a22; --text-soft:#5a6b60; --text-dim:#93a399;
+      --accent:#22a06b; --accent-2:#0ea5a3;
+      --accent-soft:rgba(34,160,107,.10); --accent-line:rgba(34,160,107,.30);
+      --ok:#16a34a; --warn:#d97706; --danger:#e11d48;
+      --term-bg:#172029; --log-info:#3a4a40; --log-ts:#65717d;
+      --term-rx:#62c746; --term-tx:#38bdf8; --term-sys:#94a3b8; --term-trace:#7b8795; --term-hover:rgba(98,199,70,.07);
+      --scroll:#d4ddd4; --scroll-h:#bccabf; --glow:rgba(34,160,107,.30);
+      --nav-bg:#e7efe7;
+      --el-color-primary:#22a06b;
+    }
+    /* 2 宣纸暖白 · light */
+    html[data-theme="paper"] {
+      --bg:#f4efe6; --bg-2:#fffaf3; --panel:#fffaf3; --panel-2:#f7f0e4;
+      --border:#e7dcc8; --border-2:#d9cbb0;
+      --text:#3b2f22; --text-soft:#7a6754; --text-dim:#a89278;
+      --accent:#b45309; --accent-2:#c2410c;
+      --accent-soft:rgba(180,83,9,.10); --accent-line:rgba(180,83,9,.28);
+      --ok:#15803d; --warn:#d97706; --danger:#be123c;
+      --term-bg:#2a2118; --log-info:#4a3b2c; --log-ts:#8a7358;
+      --term-rx:#84cc16; --term-tx:#38bdf8; --term-sys:#a8a29e; --term-trace:#78716c; --term-hover:rgba(180,83,9,.08);
+      --scroll:#e4d6c0; --scroll-h:#d0bda0; --glow:rgba(180,83,9,.28);
+      --nav-bg:#efe5d6;
+      --el-color-primary:#b45309;
+    }
+    /* 3 晴空蓝 · light */
+    html[data-theme="sky"] {
+      --bg:#eef4fb; --bg-2:#ffffff; --panel:#ffffff; --panel-2:#f1f6fc;
+      --border:#d7e3f2; --border-2:#c2d4ea;
+      --text:#1e2b3c; --text-soft:#5b6d84; --text-dim:#8fa0b5;
+      --accent:#2563eb; --accent-2:#0ea5e9;
+      --accent-soft:rgba(37,99,235,.10); --accent-line:rgba(37,99,235,.28);
+      --ok:#16a34a; --warn:#d97706; --danger:#e11d48;
+      --term-bg:#152033; --log-info:#3a4a60; --log-ts:#6b7c93;
+      --term-rx:#4ade80; --term-tx:#38bdf8; --term-sys:#94a3b8; --term-trace:#7b8795; --term-hover:rgba(37,99,235,.08);
+      --scroll:#d3dfef; --scroll-h:#b9cbe3; --glow:rgba(37,99,235,.28);
+      --nav-bg:#e6eef9;
+      --el-color-primary:#2563eb;
+    }
+    /* 4 浅紫丁香 · light */
+    html[data-theme="lavender"] {
+      --bg:#f3f0fb; --bg-2:#ffffff; --panel:#ffffff; --panel-2:#f5f2fc;
+      --border:#e2dbf3; --border-2:#cfc3ea;
+      --text:#2a2140; --text-soft:#6b5f86; --text-dim:#9a8fb3;
+      --accent:#7c3aed; --accent-2:#a855f7;
+      --accent-soft:rgba(124,58,237,.10); --accent-line:rgba(124,58,237,.28);
+      --ok:#16a34a; --warn:#d97706; --danger:#e11d48;
+      --term-bg:#1c1630; --log-info:#443a5c; --log-ts:#7a6f96;
+      --term-rx:#4ade80; --term-tx:#c084fc; --term-sys:#a1a1aa; --term-trace:#8b8b9a; --term-hover:rgba(124,58,237,.08);
+      --scroll:#ddd4f0; --scroll-h:#c7bae5; --glow:rgba(124,58,237,.28);
+      --nav-bg:#ebe5f8;
+      --el-color-primary:#7c3aed;
+    }
+    /* 5 深空青 · dark（兼容旧 dark） */
+    html[data-theme="cyan"], html.dark:not([data-theme]) {
+      --bg:#0a0e17; --bg-2:#0d1220; --panel:#111726; --panel-2:#0c111c;
+      --border:#1e2738; --border-2:#2a3650;
+      --text:#e3e9f6; --text-soft:#8a96ab; --text-dim:#525e74;
+      --accent:#22d3ee; --accent-2:#34d399;
+      --accent-soft:rgba(34,211,238,.11); --accent-line:rgba(34,211,238,.34);
+      --ok:#34d399; --warn:#fbbf24; --danger:#fb7185;
+      --term-bg:#172029; --log-info:#aeb9cc; --log-ts:#65717d;
+      --term-rx:#62c746; --term-tx:#38bdf8; --term-sys:#94a3b8; --term-trace:#7b8795; --term-hover:rgba(98,199,70,.07);
+      --scroll:#222c3b; --scroll-h:#303d52; --glow:rgba(34,211,238,.42);
+      --nav-bg:#0c111c;
+      --el-color-primary:#22d3ee;
+    }
+    /* 6 深海蓝 · dark */
+    html[data-theme="ocean"] {
+      --bg:#07111f; --bg-2:#0a1628; --panel:#0d1b2e; --panel-2:#0a1524;
+      --border:#1a2f4a; --border-2:#274468;
+      --text:#e2eefc; --text-soft:#8aa4c4; --text-dim:#4d6788;
+      --accent:#38bdf8; --accent-2:#60a5fa;
+      --accent-soft:rgba(56,189,248,.12); --accent-line:rgba(56,189,248,.34);
+      --ok:#34d399; --warn:#fbbf24; --danger:#fb7185;
+      --term-bg:#0b1728; --log-info:#a8bfd9; --log-ts:#5f7a9a;
+      --term-rx:#4ade80; --term-tx:#38bdf8; --term-sys:#94a3b8; --term-trace:#7b8795; --term-hover:rgba(56,189,248,.08);
+      --scroll:#1a2d45; --scroll-h:#274468; --glow:rgba(56,189,248,.40);
+      --nav-bg:#0a1524;
+      --el-color-primary:#38bdf8;
+    }
+    /* 7 紫晶夜 · dark */
+    html[data-theme="violet"] {
+      --bg:#0d0a14; --bg-2:#120e1c; --panel:#161022; --panel-2:#120d1c;
+      --border:#2a2140; --border-2:#3b2f58;
+      --text:#efe9ff; --text-soft:#a89bc4; --text-dim:#6b5f8a;
+      --accent:#a78bfa; --accent-2:#f472b6;
+      --accent-soft:rgba(167,139,250,.12); --accent-line:rgba(167,139,250,.34);
+      --ok:#4ade80; --warn:#fbbf24; --danger:#fb7185;
+      --term-bg:#151022; --log-info:#c4b8e0; --log-ts:#7a6f9a;
+      --term-rx:#4ade80; --term-tx:#c084fc; --term-sys:#a1a1aa; --term-trace:#8b8b9a; --term-hover:rgba(167,139,250,.08);
+      --scroll:#2a2140; --scroll-h:#3b2f58; --glow:rgba(167,139,250,.40);
+      --nav-bg:#120d1c;
+      --el-color-primary:#a78bfa;
+    }
+    /* 8 余烬暖夜 · dark */
+    html[data-theme="ember"] {
+      --bg:#120d0a; --bg-2:#18110d; --panel:#1c1410; --panel-2:#16100c;
+      --border:#3a2a1f; --border-2:#4f3a2a;
+      --text:#f5e9dc; --text-soft:#b8a08a; --text-dim:#7a6554;
+      --accent:#f59e0b; --accent-2:#fb7185;
+      --accent-soft:rgba(245,158,11,.12); --accent-line:rgba(245,158,11,.34);
+      --ok:#4ade80; --warn:#fbbf24; --danger:#fb7185;
+      --term-bg:#1a120e; --log-info:#d4c0aa; --log-ts:#8a7360;
+      --term-rx:#84cc16; --term-tx:#38bdf8; --term-sys:#a8a29e; --term-trace:#78716c; --term-hover:rgba(245,158,11,.08);
+      --scroll:#3a2a1f; --scroll-h:#4f3a2a; --glow:rgba(245,158,11,.38);
+      --nav-bg:#16100c;
+      --el-color-primary:#f59e0b;
+    }
+    /* 9 北欧极光 · dark */
+    html[data-theme="nord"] {
+      --bg:#2e3440; --bg-2:#333945; --panel:#3b4252; --panel-2:#343a48;
+      --border:#4c566a; --border-2:#5e6a80;
+      --text:#eceff4; --text-soft:#d8dee9; --text-dim:#7b88a1;
+      --accent:#88c0d0; --accent-2:#a3be8c;
+      --accent-soft:rgba(136,192,208,.14); --accent-line:rgba(136,192,208,.34);
+      --ok:#a3be8c; --warn:#ebcb8b; --danger:#bf616a;
+      --term-bg:#2e3440; --log-info:#d8dee9; --log-ts:#7b88a1;
+      --term-rx:#a3be8c; --term-tx:#81a1c1; --term-sys:#d8dee9; --term-trace:#7b88a1; --term-hover:rgba(136,192,208,.10);
+      --scroll:#434c5e; --scroll-h:#4c566a; --glow:rgba(136,192,208,.36);
+      --nav-bg:#343a48;
+      --el-color-primary:#88c0d0;
+    }
+    /* 10 石墨专业 · dark */
+    html[data-theme="graphite"] {
+      --bg:#121417; --bg-2:#16191e; --panel:#1a1d22; --panel-2:#15181c;
+      --border:#2a2f38; --border-2:#3a4150;
+      --text:#e8ecf2; --text-soft:#9aa3b2; --text-dim:#6b7382;
+      --accent:#94a3b8; --accent-2:#64748b;
+      --accent-soft:rgba(148,163,184,.12); --accent-line:rgba(148,163,184,.30);
+      --ok:#4ade80; --warn:#fbbf24; --danger:#fb7185;
+      --term-bg:#14171b; --log-info:#b8c0cc; --log-ts:#6b7382;
+      --term-rx:#4ade80; --term-tx:#38bdf8; --term-sys:#94a3b8; --term-trace:#7b8795; --term-hover:rgba(148,163,184,.08);
+      --scroll:#2a2f38; --scroll-h:#3a4150; --glow:rgba(148,163,184,.30);
+      --nav-bg:#15181c;
+      --el-color-primary:#94a3b8;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body, input, textarea, button, select,
+    .el-button, .el-input__inner, .el-textarea__inner, .el-select, .el-dialog, .el-message-box, .el-radio-button__inner, .el-tag {
+      font-family: var(--font-sans);
+    }
+    body {
+      font-family: var(--font-sans);
+      background:
+        radial-gradient(1100px 480px at 88% -8%, var(--accent-soft), transparent 60%),
+        radial-gradient(900px 420px at 0% 110%, var(--accent-soft), transparent 55%),
+        var(--bg);
+      color: var(--text);
+      height: 100vh; display: flex; flex-direction: column;
+      overflow: hidden; user-select: none;
+      -webkit-font-smoothing: antialiased;
+      transition: background .28s ease, color .28s ease;
+    }
+    code {
+      font-family: var(--mono); font-size: 12px;
+      background: var(--panel-2); border: 1px solid var(--border);
+      padding: 1px 6px; border-radius: 5px; color: var(--accent);
+    }
+    #app { flex: 1; width: 100%; display: flex; min-height: 0; }
+

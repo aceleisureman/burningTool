@@ -6,10 +6,18 @@ const fs = require('fs');
 const bus = require('./core/bus');
 const { loadConfig, saveConfig } = require('./core/config');
 
-const APP_ICON = path.join(__dirname, '..', '..', 'assets', 'icons', 'icon.png');
+// macOS 必须用多尺寸 .icns；单张 1024 PNG 在 Dock/Cmd+Tab 上会显得异常大。
+// 图标内容需保留约 10% 透明边距（见 assets/icons），否则即使用 icns 仍会“显大”。
+const ICONS_DIR = path.join(__dirname, '..', '..', 'assets', 'icons');
+const APP_ICON = process.platform === 'darwin'
+  ? path.join(ICONS_DIR, 'icon.icns')
+  : process.platform === 'win32'
+    ? path.join(ICONS_DIR, 'icon.ico')
+    : path.join(ICONS_DIR, '256x256.png');
+const APP_ICON_PNG = path.join(ICONS_DIR, '512x512.png');
 const TRAY_ICON = process.platform === 'win32'
-  ? path.join(__dirname, '..', '..', 'assets', 'icons', 'icon.ico')
-  : path.join(__dirname, '..', '..', 'assets', 'icons', '24x24.png');
+  ? path.join(ICONS_DIR, 'icon.ico')
+  : path.join(ICONS_DIR, '24x24.png');
 
 let mainWindow;
 let tray = null;
@@ -29,6 +37,28 @@ function getMainWindow() {
 // 恢复并聚焦主窗口（不存在则重建）
 function showMainWindow() {
   focusOrCreate();
+}
+
+// macOS Dock/Cmd+Tab 图标：优先 .icns（多分辨率），失败再回退带边距的 PNG。
+// 不要用未留边的 1024 全幅 PNG，否则视觉上会比系统应用明显偏大。
+function applyDockIcon() {
+  if (process.platform !== 'darwin' || !app.dock) return false;
+  const candidates = [
+    path.join(ICONS_DIR, 'icon.icns'),
+    APP_ICON_PNG,
+    path.join(ICONS_DIR, '256x256.png')
+  ];
+  for (const p of candidates) {
+    try {
+      if (!fs.existsSync(p)) continue;
+      const img = nativeImage.createFromPath(p);
+      if (img && !img.isEmpty()) {
+        app.dock.setIcon(img);
+        return true;
+      }
+    } catch {}
+  }
+  return false;
 }
 
 // 真正退出（绕过关闭=最小化到托盘的拦截）
@@ -208,4 +238,4 @@ function focusOrCreate() {
   }
 }
 
-module.exports = { createWindow, getMainWindow, focusOrCreate, prepareForQuit, APP_ICON };
+module.exports = { createWindow, getMainWindow, focusOrCreate, prepareForQuit, applyDockIcon, APP_ICON };

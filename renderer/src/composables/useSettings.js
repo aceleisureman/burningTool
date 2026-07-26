@@ -21,7 +21,7 @@ export function useSettings(deps) {
     pyocd: { percent: 0, active: false, status: 'idle', note: '' },
     commandTools: { percent: 0, active: false, status: 'idle', note: '' }
   });
-  const pathEnv = reactive({ supported: true, present: false, partial: false, dirs: [], matched: [], missing: [], message: '' });
+  const pathEnv = reactive({ supported: true, present: false, partial: false, dirs: [], matched: [], missing: [], message: '', label: '系统 PATH', profile: '', scope: '' });
   const pathEnvBusy = ref(false);
   const dlProgress  = reactive({ active: false, label: '', percent: 0 });
   const toolDetail = reactive({ visible: false, title: '', rows: [], commands: [] });
@@ -266,7 +266,10 @@ export function useSettings(deps) {
         dirs: (s && s.dirs) || [],
         matched: (s && s.matched) || [],
         missing: (s && s.missing) || [],
-        message: (s && (s.message || s.error)) || ''
+        message: (s && (s.message || s.error)) || '',
+        label: (s && s.label) || '系统 PATH',
+        profile: (s && s.profile) || '',
+        scope: (s && s.scope) || ''
       });
     } catch (e) {
       pathEnv.supported = false;
@@ -280,8 +283,8 @@ export function useSettings(deps) {
     try {
       const r = await window.api.toolchainSystemPathAdd();
       await refreshPathEnv();
-      if (r && r.ok) ElMessage.success(r.added && r.added.length ? `已写入用户 PATH（新增 ${r.added.length} 项）` : '用户 PATH 已包含工具链目录');
-      else ElMessage.error((r && (r.error || r.message)) || '写入用户 PATH 失败');
+      if (r && r.ok) ElMessage.success(r.added && r.added.length ? `已写入 PATH（新增 ${r.added.length} 项）` : 'PATH 已包含工具链目录');
+      else ElMessage.error((r && (r.error || r.message)) || '写入 PATH 失败');
     } catch (e) { ElMessage.error(e.message || String(e)); }
     pathEnvBusy.value = false;
   }
@@ -291,8 +294,8 @@ export function useSettings(deps) {
     try {
       const r = await window.api.toolchainSystemPathRemove();
       await refreshPathEnv();
-      if (r && r.ok) ElMessage.success(r.removed && r.removed.length ? `已删除用户 PATH（${r.removed.length} 项）` : '用户 PATH 中无工具链目录');
-      else ElMessage.error((r && (r.error || r.message)) || '删除用户 PATH 失败');
+      if (r && r.ok) ElMessage.success(r.removed && r.removed.length ? `已删除 PATH（${r.removed.length} 项）` : 'PATH 中无工具链目录');
+      else ElMessage.error((r && (r.error || r.message)) || '删除 PATH 失败');
     } catch (e) { ElMessage.error(e.message || String(e)); }
     pathEnvBusy.value = false;
   }

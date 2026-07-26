@@ -1,0 +1,23 @@
+    /* ════ 字模生成（PCtoLCD 风格）════ */
+    .gl-body { flex: 1; min-height: 0; display: flex; gap: 12px; }
+    .gl-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+    .gl-side { width: 268px; flex-shrink: 0; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+    .gl-card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 1px 3px rgba(0,0,0,.04); }
+    .gl-card-head { padding: 9px 13px; font-size: 13px; font-weight: 600; color: var(--text); border-bottom: 1px solid var(--border); background: var(--panel-2); border-radius: 14px 14px 0 0; }
+    .gl-card-body { padding: 12px 13px; display: flex; flex-direction: column; gap: 12px; }
+    .gl-field { display: flex; flex-direction: column; gap: 6px; }
+    .gl-field > label { font-size: 12px; color: var(--text-soft); }
+    .gl-field .el-radio-group { gap: 2px 0; }
+    .gl-input { display: flex; gap: 8px; align-items: center; }
+    .gl-input .el-input { flex: 1; }
+    .gl-preview { flex: 1; min-height: 0; overflow: auto; padding: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-content: flex-start; background: var(--bg); border: 1px solid var(--border); border-radius: 14px; }
+    .gl-cell { display: flex; flex-direction: column; align-items: center; gap: 5px; }
+    .gl-cell canvas { background: #0b1220; border-radius: 6px; box-shadow: 0 1px 4px rgba(0,0,0,.18); image-rendering: pixelated; }
+    .gl-cell .gl-ch { font-size: 12px; color: var(--text-soft); }
+    .gl-empty { margin: auto; color: var(--text-dim); font-size: 13px; }
+    .gl-out-card { display: flex; flex-direction: column; min-height: 150px; max-height: 38%; }
+    .gl-out-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--panel-2); border-radius: 14px 14px 0 0; }
+    .gl-out-head .gl-out-title { font-size: 13px; font-weight: 600; }
+    .gl-out-head .spacer { flex: 1; }
+    .gl-out { flex: 1; overflow: auto; margin: 0; padding: 11px 13px; font-family: var(--mono); font-size: 12.5px; line-height: 1.5; color: var(--text); white-space: pre; user-select: text; }
+

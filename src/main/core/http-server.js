@@ -259,7 +259,7 @@ let _bound = null;
 function start(opts = {}) {
   if (_server) return Promise.resolve(_bound);
   const host = opts.host || '127.0.0.1';
-  const port = opts.port || 27080;
+  const port = opts.port ?? 27080;
   return new Promise((resolve, reject) => {
     const srv = http.createServer((req, res) => {
       handle(req, res).catch((e) => {
@@ -269,7 +269,8 @@ function start(opts = {}) {
     srv.on('error', (e) => { _server = null; reject(e); });
     srv.listen(port, host, () => {
       _server = srv;
-      _bound = { host, port };
+      const address = srv.address();
+      _bound = { host, port: address && typeof address === 'object' ? address.port : port };
       resolve(_bound);
     });
   });

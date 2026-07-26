@@ -1,0 +1,86 @@
+    /* ════ StcGal（STC 串口/USB BSL）════ */
+    .stc-body { flex: 1; display: flex; min-height: 0; overflow: hidden; }
+    .stc-main { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 15px 18px 9px; gap: 12px; overflow: hidden; }
+    .stc-panel { flex-shrink: 0; }
+    .stc-hero {
+      display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+      align-items: center; gap: 20px;
+      background: linear-gradient(135deg, var(--accent-soft), transparent 72%);
+    }
+    .stc-hero > :first-child { min-width: 0; }
+    .stc-hero .eyebrow {
+      display: inline-flex; align-items: center; gap: 7px;
+      color: var(--accent); font-size: 10.5px; font-weight: 800;
+      letter-spacing: .16em; text-transform: uppercase;
+    }
+    .stc-hero .eyebrow::before { content: ""; width: 16px; height: 2px; border-radius: 2px; background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
+    .stc-hero .title { margin-top: 5px; color: var(--text); font-size: 17px; font-weight: 800; letter-spacing: .2px; }
+    .stc-hero .hint { margin-top: 6px; color: var(--text-soft); font-size: 12.5px; line-height: 1.65; }
+    .stc-tool-state {
+      width: 100%; min-width: 0; max-width: 360px; justify-self: end;
+      display: flex; flex-direction: column; gap: 8px; overflow: hidden;
+      border: 1px solid rgba(225,29,72,.26); border-radius: 12px;
+      background: rgba(225,29,72,.06); padding: 12px 14px;
+      transition: border-color .2s ease, background .2s ease;
+    }
+    .stc-tool-state.ok { border-color: var(--accent-line); background: var(--panel-2); }
+    .stc-tool-state.installing { border-color: var(--accent-line); background: var(--accent-soft); }
+    .stc-tool-state .sts-head { display: flex; align-items: center; gap: 8px; }
+    .stc-tool-state .sts-title { display: inline-flex; align-items: center; gap: 6px; color: var(--text); font-size: 12.5px; font-weight: 750; }
+    .stc-tool-state .sts-title .el-icon { font-size: 15px; color: #e11d48; }
+    .stc-tool-state.ok .sts-title .el-icon,
+    .stc-tool-state.installing .sts-title .el-icon { color: var(--accent); }
+    .stc-tool-state .sts-head .el-tag { margin-left: auto; }
+    .stc-tool-state code {
+      display: block; min-width: 0; max-width: 100%; overflow: hidden;
+      white-space: nowrap; text-overflow: ellipsis;
+      color: var(--text-dim); font-family: var(--mono); font-size: 11.5px; line-height: 1.5;
+    }
+    .stc-tool-state .sts-ver {
+      min-width: 0; max-width: 100%; overflow: hidden;
+      white-space: nowrap; text-overflow: ellipsis;
+      color: var(--text-soft); font-size: 11.5px; font-weight: 600;
+    }
+    .stc-tool-state .sts-actions { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
+    .el-icon.is-spin { animation: stc-spin 1s linear infinite; }
+    @keyframes stc-spin { to { transform: rotate(360deg); } }
+    .stc-grid { display: grid; grid-template-columns: 1.05fr 1.05fr 1.4fr; gap: 12px; }
+    .stc-card {
+      min-width: 0; border: 1px solid var(--border); border-radius: 14px;
+      background: var(--panel-2); padding: 12px 13px; box-shadow: 0 1px 3px rgba(0,0,0,.04);
+    }
+    .stc-card-h { display: flex; align-items: center; gap: 8px; color: var(--text); font-size: 13px; font-weight: 750; padding-bottom: 10px; margin-bottom: 10px; border-bottom: 1px solid var(--border); }
+    .stc-card-h .el-icon { color: var(--accent); }
+    .stc-inline { display: flex; gap: 8px; align-items: center; }
+    .stc-file-card { display: flex; flex-direction: column; }
+    .stc-file-pick { flex: 1; display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .stc-file-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+    .stc-file-meta b { color: var(--text); font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .stc-file-meta span { color: var(--text-dim); font-family: var(--mono); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .stc-file-pick.secondary { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); }
+    .stc-advanced { display: grid; grid-template-columns: .75fr .9fr minmax(260px, 1.35fr); gap: 12px; }
+    .stc-card.compact { padding: 11px 12px; }
+    .stc-card.compact .stc-card-h { margin-bottom: 9px; padding-bottom: 8px; }
+    .stc-card.wide { min-width: 0; }
+    .stc-checks { display: flex; flex-direction: column; gap: 8px; min-height: 58px; justify-content: center; }
+    .stc-actions { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+
+    .stc-steps { display: flex; gap: 10px; flex-wrap: wrap; }
+    .stc-steps div {
+      display: inline-flex; align-items: center; gap: 8px; min-height: 36px;
+      border: 1px solid var(--border); background: var(--panel-2); border-radius: 999px;
+      padding: 5px 11px 5px 6px; color: var(--text-soft); font-size: 12px; font-weight: 600;
+    }
+    .stc-steps b {
+      width: 24px; height: 24px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff; font-family: var(--mono); font-size: 12px;
+    }
+    .stc-actions .one-shot { min-width: 150px; height: 44px; }
+    @media (max-width: 1180px) {
+      .stc-hero { grid-template-columns: 1fr; align-items: stretch; }
+      .stc-actions { flex-direction: column; align-items: stretch; }
+      .stc-tool-state { min-width: 0; max-width: none; justify-self: stretch; }
+      .stc-grid, .stc-advanced { grid-template-columns: 1fr; }
+      .stc-file-pick { align-items: stretch; flex-direction: column; }
+    }
+

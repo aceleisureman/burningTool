@@ -32,3 +32,7 @@ __pycache__/
 _test_out.txt
 install_out.txt
 .claude/
+.superpowers/
+
+# 图标全幅原稿备份（仅本地）
+assets/icons/_fullbleed_backup/
