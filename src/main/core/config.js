@@ -89,8 +89,13 @@ function configPath() {
   return path.join(app.getPath('userData'), 'config.json');
 }
 
-// 内存缓存：避免每次 IPC 都同步读盘 + JSON.parse（saveConfig 写盘时同步刷新缓存）
+// 内存缓存：避免每次 IPC 都同步读盘 + JSON.parse
 let _configCache = null;
+// 防抖落盘：设置开关/窗口拖拽会高频 save；合并写盘降低主进程卡顿
+let _saveTimer = null;
+let _dirtyConfig = null; // 待写入磁盘的最新快照
+const SAVE_DEBOUNCE_MS = 80;
+
 function loadConfig() {
   if (_configCache) return _configCache;
   try {
@@ -111,14 +116,62 @@ function normalizeConfig(cfg) {
   return next;
 }
 
+function writeConfigToDisk(merged) {
+  const p = configPath();
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  // 原子写：先写临时文件再 rename，避免进程被杀时截断 config.json
+  const tmp = p + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(merged, null, 2), 'utf8');
+  try {
+    fs.renameSync(tmp, p);
+  } catch {
+    // 跨设备等极端情况：回退直接写
+    fs.writeFileSync(p, JSON.stringify(merged, null, 2), 'utf8');
+    try { fs.unlinkSync(tmp); } catch {}
+  }
+}
+
+function scheduleDiskWrite(merged) {
+  _dirtyConfig = merged;
+  if (_saveTimer) return;
+  _saveTimer = setTimeout(() => {
+    _saveTimer = null;
+    const snap = _dirtyConfig;
+    _dirtyConfig = null;
+    if (snap) writeConfigToDisk(snap);
+  }, SAVE_DEBOUNCE_MS);
+  if (_saveTimer.unref) _saveTimer.unref();
+}
+
+// 退出前强制落盘，避免防抖窗口内丢配置
+function flushSaveConfig() {
+  if (_saveTimer) {
+    clearTimeout(_saveTimer);
+    _saveTimer = null;
+  }
+  if (_dirtyConfig) {
+    const snap = _dirtyConfig;
+    _dirtyConfig = null;
+    writeConfigToDisk(snap);
+    return true;
+  }
+  return false;
+}
+
 // 合并保存：以“当前已持久化配置”为底，仅覆盖传入的字段，
 // 避免设置面只传部分字段时把 recentProjects 等其他字段清空。
-function saveConfig(cfg) {
+// opts.immediate === true 时同步写盘（重置配置等关键路径）。
+function saveConfig(cfg, opts) {
   const base = Object.assign({}, DEFAULT_CONFIG, loadConfig());
   const merged = normalizeConfig(mergeCurrentPlatformPaths(base, cfg, PLATFORM_TC.id, DEFAULT_CONFIG));
-  fs.mkdirSync(path.dirname(configPath()), { recursive: true });
-  fs.writeFileSync(configPath(), JSON.stringify(merged, null, 2), 'utf8');
   _configCache = merged;
+  if (opts && opts.immediate) {
+    if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
+    _dirtyConfig = null;
+    writeConfigToDisk(merged);
+  } else {
+    scheduleDiskWrite(merged);
+  }
   return merged;
 }
 
@@ -148,6 +201,7 @@ module.exports = {
   loadConfig,
   normalizeConfig,
   saveConfig,
+  flushSaveConfig,
   addRecent,
   removeRecent
 };

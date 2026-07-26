@@ -28,10 +28,7 @@ function getMainWindow() {
 
 // 恢复并聚焦主窗口（不存在则重建）
 function showMainWindow() {
-  if (!mainWindow || mainWindow.isDestroyed()) { createWindow(); return; }
-  if (mainWindow.isMinimized()) mainWindow.restore();
-  if (!mainWindow.isVisible()) mainWindow.show();
-  mainWindow.focus();
+  focusOrCreate();
 }
 
 // 真正退出（绕过关闭=最小化到托盘的拦截）
@@ -195,8 +192,17 @@ function setupHotReload(win) {
 function focusOrCreate() {
   if (mainWindow && !mainWindow.isDestroyed()) {
     if (mainWindow.isMinimized()) mainWindow.restore();
+    // hide 到托盘后 isVisible()=false，需 show 才能从 Dock 点回
     if (!mainWindow.isVisible()) mainWindow.show();
+    if (typeof mainWindow.moveTop === 'function') {
+      try { mainWindow.moveTop(); } catch {}
+    }
     mainWindow.focus();
+    // macOS：确保应用本身被激活到前台（仅 show 窗口有时不够）
+    if (process.platform === 'darwin') {
+      try { app.focus({ steal: true }); } catch {}
+      try { if (app.dock && typeof app.dock.show === 'function') app.dock.show(); } catch {}
+    }
   } else {
     createWindow();
   }

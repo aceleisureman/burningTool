@@ -1,7 +1,7 @@
 // 加载 polyfill（install() 内部用 setImmediate 延迟执行，
 // 先让 Electron 二进制 patch require('electron')，主进程代码首次 require 拿到真实 API）
 require('./electron-api');
-const { app, BrowserWindow, ipcMain, dialog, nativeImage, clipboard } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const {
@@ -9,10 +9,12 @@ const {
   DEFAULT_CONFIG,
   loadConfig,
   saveConfig,
+  flushSaveConfig,
   addRecent,
   removeRecent
 } = require('./core/config');
 const bus = require('./core/bus');
+const jobLock = require('./core/job-lock');
 const {
   readHostSystemInfo,
   toolsDir,
@@ -52,8 +54,6 @@ const { readRamLog } = require('./ramlog/ramlog');
 const httpApi = require('./core/http-server');
 const updater = require('./core/updater');
 const windows = require('./windows');
-
-const APP_ICON = path.join(__dirname, '..', '..', 'assets', 'icons', 'icon.png');
 /* ── 日志助手 ─────────────────────────────────────────── */
 // 攒批：make 全量编译每秒可产生数百行日志，逐条 webContents.send 的 IPC 洪流会拖慢两端；
 // 合并 30ms 窗口内的条目成数组一次推送（渲染端 useLog.appendLog 兼容数组/单条）
@@ -97,20 +97,34 @@ if (!gotSingleInstanceLock) {
 } else {
   app.on('second-instance', () => windows.focusOrCreate());
   app.whenReady().then(() => {
-    if (process.platform === 'darwin' && app.dock) {
-      const dockImg = nativeImage.createFromPath(APP_ICON);
-      if (!dockImg.isEmpty()) app.dock.setIcon(dockImg);
-    }
+    // 不要在这里 app.dock.setIcon(1024 PNG)：
+    // macOS Cmd+Tab / Dock 会按单分辨率位图渲染，图标会比系统应用明显偏大。
+    // 打包态走 build.mac.icon（icon.icns 多尺寸）；开发态沿用 Electron 默认即可。
     windows.createWindow();
     startHttpApiFromConfig();
     updater.checkOnStartup();
   });
+  // macOS：点 Dock 图标触发 activate。关闭窗口实际是 hide 到托盘，
+  // 窗口对象仍在，不能只在 length===0 时 create；应恢复/显示已有窗口。
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) windows.createWindow();
+    if (app.isQuitting) return;
+    windows.focusOrCreate();
   });
 }
-app.on('window-all-closed', () => app.quit());
+// 关闭按钮实际是 hide 到托盘，窗口对象仍在；仅当真正退出（isQuitting）或
+// 非 darwin 且已无窗口时才 quit。macOS 保持托盘/Dock 常驻，退出走托盘菜单。
+app.on('window-all-closed', () => {
+  if (app.isQuitting) {
+    app.quit();
+    return;
+  }
+  if (process.platform === 'darwin') return;
+  // Windows/Linux：若用户以某种路径销毁了全部窗口且未走 quitApp，仍退出
+  if (BrowserWindow.getAllWindows().length === 0) app.quit();
+});
 app.on('before-quit', () => {
+  try { app.isQuitting = true; } catch {}
+  try { flushSaveConfig(); } catch {}
   try { httpApi.stop(); } catch {}
   try {
     const serial = require('./devices/serial');
@@ -206,7 +220,12 @@ ipcMain.handle('install-stcgal', async (_e, opts) => {
     return { ok: false, error: e.message };
   }
 });
-ipcMain.handle('flash-stc51', async (_e, opts) => flashStc51(opts || {}, loadConfig()));
+ipcMain.handle('flash-stc51', async (_e, opts) => {
+  const locked = await jobLock.runExclusive('flash-stc51', async () => flashStc51(opts || {}, loadConfig()));
+  if (locked.busy) return { ok: false, success: false, busy: true, error: locked.error };
+  if (locked.ok === false && locked.result == null) return { ok: false, success: false, error: locked.error };
+  return locked.result;
+});
 ipcMain.handle('esp32-tool-status', async () => esp32ToolStatus(loadConfig()));
 ipcMain.handle('install-esptool', async (_e, opts) => {
   try {
@@ -215,7 +234,12 @@ ipcMain.handle('install-esptool', async (_e, opts) => {
     return { ok: false, error: e.message };
   }
 });
-ipcMain.handle('flash-esp32', async (_e, opts) => flashEsp32(opts || {}, loadConfig()));
+ipcMain.handle('flash-esp32', async (_e, opts) => {
+  const locked = await jobLock.runExclusive('flash-esp32', async () => flashEsp32(opts || {}, loadConfig()));
+  if (locked.busy) return { ok: false, success: false, busy: true, error: locked.error };
+  if (locked.ok === false && locked.result == null) return { ok: false, success: false, error: locked.error };
+  return locked.result;
+});
 ipcMain.handle('export-quickcmds', async (_e, data) => {
   const r = await dialog.showSaveDialog(windows.getMainWindow(), {
     title: '导出快捷指令', defaultPath: 'quick-commands.json',
@@ -246,8 +270,8 @@ registerMqtt(ipcMain, app, pushToRenderer);
 
 ipcMain.handle('reset-config', () => {
   const cur = loadConfig();
-  // 恢复默认路径/设置，但保留历史项目
-  return saveConfig(Object.assign({}, DEFAULT_CONFIG, { recentProjects: cur.recentProjects }));
+  // 恢复默认路径/设置，但保留历史项目；立即落盘
+  return saveConfig(Object.assign({}, DEFAULT_CONFIG, { recentProjects: cur.recentProjects }), { immediate: true });
 });
 
 /* 历史项目 */
@@ -305,33 +329,73 @@ ipcMain.handle('select-firmware-file', async () => {
   }
 });
 
+ipcMain.handle('job-status', () => jobLock.getJobState());
+ipcMain.handle('job-cancel', () => jobLock.cancelJob('user-cancel'));
+
 ipcMain.handle('generate-makefile', async (_e, projectDir) => {
   addRecent(projectDir);
-  try {
-    return await generateMakefile(projectDir, loadConfig());
-  } catch (e) {
-    send(`[生成] ✗ 异常: ${e.message}`, 'error');
-    return { ok: false, error: e.message };
+  const locked = await jobLock.runExclusive('generate-makefile', async () => {
+    try {
+      return await generateMakefile(projectDir, loadConfig());
+    } catch (e) {
+      send(`[生成] ✗ 异常: ${e.message}`, 'error');
+      return { ok: false, error: e.message };
+    }
+  });
+  if (locked.busy) {
+    send(`[任务] 忙碌中，无法生成 Makefile：${locked.error}`, 'warn');
+    return { ok: false, busy: true, error: locked.error };
   }
+  return locked.result || { ok: false, error: locked.error || '生成失败' };
 });
 
 ipcMain.handle('build', async (_e, projectDir) => {
   addRecent(projectDir);
-  const ok = await compile(projectDir, loadConfig());
-  return { success: ok };
+  const locked = await jobLock.runExclusive('build', async () => {
+    const ok = await compile(projectDir, loadConfig());
+    return { success: ok };
+  });
+  if (locked.busy) {
+    send(`[任务] 忙碌中，无法开始编译：${locked.error}`, 'warn');
+    return { success: false, busy: true, error: locked.error };
+  }
+  if (locked.ok === false && !locked.result) {
+    return { success: false, error: locked.error || '编译失败' };
+  }
+  return locked.result || { success: false };
 });
 
 ipcMain.handle('flash', async (_e, projectDir) => {
   addRecent(projectDir);
-  const ok = await flash(projectDir, loadConfig());
-  return { success: ok };
+  const locked = await jobLock.runExclusive('flash', async () => {
+    const ok = await flash(projectDir, loadConfig());
+    return { success: ok };
+  });
+  if (locked.busy) {
+    send(`[任务] 忙碌中，无法开始烧录：${locked.error}`, 'warn');
+    return { success: false, busy: true, error: locked.error };
+  }
+  if (locked.ok === false && !locked.result) {
+    return { success: false, error: locked.error || '烧录失败' };
+  }
+  return locked.result || { success: false };
 });
 
 ipcMain.handle('build-and-flash', async (_e, projectDir) => {
   addRecent(projectDir);
-  const cfg = loadConfig();
-  const buildOk = await compile(projectDir, cfg);
-  if (!buildOk) return { buildOk: false, flashOk: false };
-  const flashOk = await flash(projectDir, cfg);
-  return { buildOk, flashOk };
+  const locked = await jobLock.runExclusive('build-and-flash', async () => {
+    const cfg = loadConfig();
+    const buildOk = await compile(projectDir, cfg);
+    if (!buildOk) return { buildOk: false, flashOk: false };
+    const flashOk = await flash(projectDir, cfg);
+    return { buildOk, flashOk };
+  });
+  if (locked.busy) {
+    send(`[任务] 忙碌中，无法一键编译烧录：${locked.error}`, 'warn');
+    return { buildOk: false, flashOk: false, busy: true, error: locked.error };
+  }
+  if (locked.ok === false && !locked.result) {
+    return { buildOk: false, flashOk: false, error: locked.error || '任务失败' };
+  }
+  return locked.result || { buildOk: false, flashOk: false };
 });
