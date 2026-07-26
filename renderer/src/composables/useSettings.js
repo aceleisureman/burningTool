@@ -8,12 +8,21 @@ export function useSettings(deps) {
   const platform = ref('unknown');
   const toolchainProfile = reactive({ label: '', supportsKeil: false, commandTools: { mode: 'system' }, defaultDownloads: { gcc: {}, make: {} }, placeholders: {} });
   const config = reactive({ targetChip: 'stm32f103c8', elfName: '', flashMethod: 'pyocd' });
-  const draft  = reactive({ armGccPath: '', makePath: '', pyocdPath: '', openocdPath: '', targetChip: '', elfName: '', autoDetectChip: true, connectUnderReset: false, toolchainMode: 'custom', ghProxy: '', buildSystem: 'auto', keilUV4Path: '', keilRebuild: false, cubeMxPath: '', flashMethod: 'pyocd' });
+  const draft  = reactive({ armGccPath: '', makePath: '', pyocdPath: '', openocdPath: '', targetChip: '', elfName: '', autoDetectChip: true, connectUnderReset: false, toolchainMode: 'custom', toolchainRootPath: '', ghProxy: '', buildSystem: 'auto', keilUV4Path: '', keilRebuild: false, cubeMxPath: '', flashMethod: 'pyocd' });
   const settingsVisible = ref(false);
   const envReady   = ref(false);
   const installing = ref(false);
   const installingDefault = ref(false);
-  const defaultTc   = reactive({ gccBin: '', makeBin: '', busybox: false, pyocdBin: '', openocdBin: '' });
+  const defaultTc   = reactive({ gccBin: '', makeBin: '', busybox: false, pyocdBin: '', openocdBin: '', root: '', toolchainRootPath: '' });
+  const toolProgress = reactive({
+    gcc: { percent: 0, active: false, status: 'idle', note: '' },
+    make: { percent: 0, active: false, status: 'idle', note: '' },
+    openocd: { percent: 0, active: false, status: 'idle', note: '' },
+    pyocd: { percent: 0, active: false, status: 'idle', note: '' },
+    commandTools: { percent: 0, active: false, status: 'idle', note: '' }
+  });
+  const pathEnv = reactive({ supported: true, present: false, partial: false, dirs: [], matched: [], missing: [], message: '' });
+  const pathEnvBusy = ref(false);
   const dlProgress  = reactive({ active: false, label: '', percent: 0 });
   const toolDetail = reactive({ visible: false, title: '', rows: [], commands: [] });
 
@@ -62,12 +71,19 @@ export function useSettings(deps) {
     const makeMode = toolchainProfile.defaultDownloads && toolchainProfile.defaultDownloads.make && toolchainProfile.defaultDownloads.make.mode;
     return makeMode === 'download' ? '下载缺失的工具链' : '下载 ARM GCC';
   });
+  const defaultToolchainRootDisplay = computed(() => {
+    const custom = String(draft.toolchainRootPath || defaultTc.toolchainRootPath || '').trim();
+    if (custom) return custom;
+    if (defaultTc.root) return defaultTc.root;
+    return '应用数据目录 toolchain/（升级后保留）';
+  });
   const defaultToolchainHint = computed(() => {
     const label = toolchainProfile.label || '当前平台';
     if (draft.toolchainMode !== 'default') return `${label} 当前使用自定义路径，不会自动下载工具链。`;
     const makeMode = toolchainProfile.defaultDownloads && toolchainProfile.defaultDownloads.make && toolchainProfile.defaultDownloads.make.mode;
-    if (makeMode === 'download') return '下载到软件根目录 toolchain/（ARM GCC + make + OpenOCD + 编译命令），创建本地 pyOCD，并自动写入用户 PATH。';
-    return `${label} 默认下载 ARM GCC 到软件根目录 toolchain/gcc/、OpenOCD 到 toolchain/openocd/，创建本地 pyOCD 到 toolchain/pyocd/，并自动写入用户 PATH；make 与 rm/mkdir/sh 等命令使用系统自带环境。`;
+    const rootText = defaultToolchainRootDisplay.value;
+    if (makeMode === 'download') return `下载到 ${rootText}（ARM GCC + make + OpenOCD + 编译命令），创建本地 pyOCD，。`;
+    return `${label} 默认下载到 ${rootText}：ARM GCC、OpenOCD、本地 pyOCD；。make 与 rm/mkdir/sh 等命令使用系统自带环境。`;
   });
 
   async function setFlashMethod(v) { config.flashMethod = v; try { Object.assign(config, await window.api.saveConfig({ flashMethod: v })); } catch (e) {} }
@@ -101,6 +117,17 @@ export function useSettings(deps) {
     appShell.tool.value = 'settings';
   }
   function closeSettings() { appShell.tool.value = (appShell.prevTool.value && appShell.prevTool.value !== 'settings') ? appShell.prevTool.value : 'flash'; }
+
+  async function chooseToolchainRoot() {
+    try {
+      const result = await window.api.selectDirectory();
+      // selectDirectory 返回 dirInfo: { dir, hasMakefile, ... }，取消时为 null
+      if (result && result.dir) {
+        draft.toolchainRootPath = result.dir;
+      }
+    } catch (e) { ElMessage.error('选择目录失败：' + (e && e.message ? e.message : e)); }
+  }
+  function clearToolchainRoot() { draft.toolchainRootPath = ''; }
   async function saveSettings() {
     try {
       const plain = JSON.parse(JSON.stringify(draft));
@@ -131,16 +158,202 @@ export function useSettings(deps) {
     catch (e) { appendLog({ text: `[异常] ${e.message}`, type: 'error' }); }
     installing.value = false;
   }
-  async function refreshDefaultTc() { try { Object.assign(defaultTc, await window.api.defaultToolchainStatus()); } catch {} }
+
+  function mapProgressLabel(label) {
+    const t = String(label || '').toLowerCase();
+    if (!t) return '';
+    if (t.includes('gcc') || t.includes('arm')) return 'gcc';
+    if (t.includes('make')) return 'make';
+    if (t.includes('openocd')) return 'openocd';
+    if (t.includes('pyocd')) return 'pyocd';
+    if (t.includes('busybox') || t.includes('command') || t.includes('编译命令')) return 'commandTools';
+    return '';
+  }
+  function resetToolProgress() {
+    for (const k of Object.keys(toolProgress)) {
+      toolProgress[k].percent = 0;
+      toolProgress[k].active = false;
+      toolProgress[k].status = 'idle';
+      toolProgress[k].note = '';
+    }
+  }
+  function markToolProgress(key, patch) {
+    if (!key || !toolProgress[key]) return;
+    Object.assign(toolProgress[key], patch || {});
+  }
+  function toolProgressText(key) {
+    const p = toolProgress[key];
+    if (!p) return '';
+    if (p.status === 'downloading') return `下载中 ${Math.max(0, Math.min(100, p.percent | 0))}%`;
+    if (p.status === 'installing') return p.note || '安装中…';
+    if (p.status === 'done') return '完成';
+    if (p.status === 'error') return '失败';
+    if (p.status === 'skip') return '已存在';
+    return '';
+  }
+  function toolReady(key) {
+    if (key === 'gcc') return !!defaultTc.gccBin;
+    if (key === 'make') return !!defaultTc.makeBin;
+    if (key === 'pyocd') return !!defaultTc.pyocdBin;
+    if (key === 'openocd') return !!defaultTc.openocdBin;
+    if (key === 'commandTools') return !!(defaultTc.busybox || (toolchainProfile.commandTools && toolchainProfile.commandTools.mode === 'system'));
+    return false;
+  }
+  function toolName(key) {
+    if (key === 'gcc') return 'ARM GCC';
+    if (key === 'make') return 'make';
+    if (key === 'pyocd') return 'pyOCD';
+    if (key === 'openocd') return 'OpenOCD';
+    if (key === 'commandTools') return (toolchainProfile.commandTools && toolchainProfile.commandTools.mode === 'busybox') ? '编译命令' : '系统命令';
+    return key;
+  }
+  function toolStateText(key) {
+    const p = toolProgress[key];
+    if (p && (p.active || p.status === 'downloading' || p.status === 'installing')) return toolProgressText(key);
+    if (p && p.status === 'error' && !toolReady(key)) return '失败';
+    if (key === 'make' && defaultTc.makeBin === 'system') return '系统提供';
+    if (key === 'commandTools' && toolchainProfile.commandTools && toolchainProfile.commandTools.mode === 'system') return '系统提供';
+    if (key === 'pyocd' && toolReady(key)) return '本地已就绪';
+    if (toolReady(key)) return '已就绪';
+    return '未安装';
+  }
+  function toolTagType(key) {
+    const p = toolProgress[key];
+    if (p && p.status === 'error' && !toolReady(key)) return 'danger';
+    if (p && (p.active || p.status === 'downloading' || p.status === 'installing')) return 'warning';
+    if (toolReady(key)) return 'success';
+    return 'info';
+  }
+  // 仅下载/安装/失败过程中显示进度条；已就绪时只展示状态，避免满条进度造成“还在下载”的错觉
+  function showToolProgress(key) {
+    const p = toolProgress[key];
+    if (!p) return false;
+    return !!(p.active || p.status === 'downloading' || p.status === 'installing' || (p.status === 'error' && !toolReady(key)));
+  }
+  function toolProgressPercent(key) {
+    const p = toolProgress[key];
+    if (!p) return 0;
+    if (p.status === 'installing' && (p.percent | 0) >= 100) return 100;
+    return Math.max(0, Math.min(100, p.percent | 0));
+  }
+  function toolProgressBarStatus(key) {
+    const p = toolProgress[key];
+    if (!p) return undefined;
+    if (p.status === 'error') return 'exception';
+    if (p.status === 'installing' && (p.percent | 0) >= 100) return 'success';
+    return undefined;
+  }
+  const defaultToolchainItems = computed(() => (
+    ['gcc', 'make', 'pyocd', 'openocd', 'commandTools'].map((key) => ({
+      key,
+      name: toolName(key),
+      ready: toolReady(key),
+      stateText: toolStateText(key),
+      tagType: toolTagType(key),
+      versionText: toolVersionText(key),
+      showProgress: showToolProgress(key),
+      percent: toolProgressPercent(key),
+      progressStatus: toolProgressBarStatus(key)
+    }))
+  ));
+  async function refreshPathEnv() {
+    try {
+      const s = await window.api.toolchainSystemPathStatus();
+      Object.assign(pathEnv, {
+        supported: s && s.supported !== false,
+        present: !!(s && s.present),
+        partial: !!(s && s.partial),
+        dirs: (s && s.dirs) || [],
+        matched: (s && s.matched) || [],
+        missing: (s && s.missing) || [],
+        message: (s && (s.message || s.error)) || ''
+      });
+    } catch (e) {
+      pathEnv.supported = false;
+      pathEnv.present = false;
+      pathEnv.message = e && e.message ? e.message : String(e);
+    }
+  }
+  async function addSystemPathEnv() {
+    if (pathEnvBusy.value) return;
+    pathEnvBusy.value = true;
+    try {
+      const r = await window.api.toolchainSystemPathAdd();
+      await refreshPathEnv();
+      if (r && r.ok) ElMessage.success(r.added && r.added.length ? `已写入用户 PATH（新增 ${r.added.length} 项）` : '用户 PATH 已包含工具链目录');
+      else ElMessage.error((r && (r.error || r.message)) || '写入用户 PATH 失败');
+    } catch (e) { ElMessage.error(e.message || String(e)); }
+    pathEnvBusy.value = false;
+  }
+  async function removeSystemPathEnv() {
+    if (pathEnvBusy.value) return;
+    pathEnvBusy.value = true;
+    try {
+      const r = await window.api.toolchainSystemPathRemove();
+      await refreshPathEnv();
+      if (r && r.ok) ElMessage.success(r.removed && r.removed.length ? `已删除用户 PATH（${r.removed.length} 项）` : '用户 PATH 中无工具链目录');
+      else ElMessage.error((r && (r.error || r.message)) || '删除用户 PATH 失败');
+    } catch (e) { ElMessage.error(e.message || String(e)); }
+    pathEnvBusy.value = false;
+  }
+
+  async function refreshDefaultTc() {
+    try { Object.assign(defaultTc, await window.api.defaultToolchainStatus()); } catch {}
+    await refreshPathEnv();
+  }
   async function installDefaultTc(force = false) {
-    installingDefault.value = true; dlProgress.active = true; dlProgress.percent = 0; dlProgress.label = '';
-    try { const r = await window.api.installDefaultToolchain({ force: !!force }); Object.assign(defaultTc, r); if (r && r.ok) { ElMessage.success('默认工具链已就绪'); checkEnv(); } else ElMessage.error('安装未完全成功，详见日志'); }
-    catch (e) { appendLog({ text: `[异常] ${e.message}`, type: 'error' }); }
+    installingDefault.value = true;
+    dlProgress.active = true; dlProgress.percent = 0; dlProgress.label = '';
+    resetToolProgress();
+    // 预先标记可能下载/安装的项
+    markToolProgress('gcc', { status: 'installing', note: force ? '准备下载…' : '检查中…', active: true, percent: 0 });
+    markToolProgress('make', { status: 'installing', note: force ? '准备下载…' : '检查中…', active: true, percent: 0 });
+    markToolProgress('openocd', { status: 'installing', note: force ? '准备下载…' : '检查中…', active: true, percent: 0 });
+    markToolProgress('pyocd', { status: 'installing', note: '准备安装…', active: true, percent: 0 });
+    if (toolchainProfile.commandTools && toolchainProfile.commandTools.mode === 'busybox') {
+      markToolProgress('commandTools', { status: 'installing', note: '检查中…', active: true, percent: 0 });
+    } else {
+      markToolProgress('commandTools', { status: 'skip', note: '系统提供', active: false, percent: 100 });
+    }
+    try {
+      const r = await window.api.installDefaultToolchain({ force: !!force });
+      Object.assign(defaultTc, r);
+      // 按结果刷新各工具状态
+      markToolProgress('gcc', { status: r && r.gccBin ? 'done' : 'error', percent: r && r.gccBin ? 100 : toolProgress.gcc.percent, active: false, note: r && r.gccBin ? '完成' : '未就绪' });
+      markToolProgress('make', { status: r && r.makeBin ? 'done' : (toolchainProfile.defaultDownloads?.make?.mode === 'system' ? 'skip' : 'error'), percent: 100, active: false, note: r && r.makeBin === 'system' ? '系统提供' : (r && r.makeBin ? '完成' : '未就绪') });
+      markToolProgress('openocd', { status: r && r.openocdBin ? 'done' : 'error', percent: r && r.openocdBin ? 100 : toolProgress.openocd.percent, active: false, note: r && r.openocdBin ? '完成' : '未就绪' });
+      markToolProgress('pyocd', { status: r && r.pyocdBin ? 'done' : 'error', percent: r && r.pyocdBin ? 100 : toolProgress.pyocd.percent, active: false, note: r && r.pyocdBin ? '完成' : '未就绪' });
+      if (toolchainProfile.commandTools && toolchainProfile.commandTools.mode === 'busybox') {
+        markToolProgress('commandTools', { status: r && r.busybox ? 'done' : 'error', percent: 100, active: false, note: r && r.busybox ? '完成' : '未就绪' });
+      }
+      await refreshPathEnv();
+      if (r && r.ok) { ElMessage.success('默认工具链已就绪'); checkEnv(); }
+      else ElMessage.error('安装未完全成功，详见日志');
+    } catch (e) {
+      appendLog({ text: `[异常] ${e.message}`, type: 'error' });
+      for (const k of Object.keys(toolProgress)) {
+        if (toolProgress[k].status === 'downloading' || toolProgress[k].status === 'installing') {
+          markToolProgress(k, { status: 'error', active: false, note: '失败' });
+        }
+      }
+    }
     installingDefault.value = false; dlProgress.active = false;
   }
 
   onMounted(() => {
-    window.api.onDownloadProgress((p) => { dlProgress.label = p.label || ''; dlProgress.percent = p.percent < 0 ? dlProgress.percent : p.percent; dlProgress.active = p.percent < 100; });
+    window.api.onDownloadProgress((p) => {
+      const label = p && p.label ? p.label : '';
+      const percent = p && typeof p.percent === 'number' ? p.percent : -1;
+      dlProgress.label = label;
+      if (percent >= 0) dlProgress.percent = percent;
+      dlProgress.active = percent < 100;
+      const key = mapProgressLabel(label);
+      if (!key) return;
+      if (percent < 0) markToolProgress(key, { status: 'downloading', active: true, note: '下载中…' });
+      else if (percent >= 100) markToolProgress(key, { status: 'installing', active: true, percent: 100, note: '解压/安装中…' });
+      else markToolProgress(key, { status: 'downloading', active: true, percent, note: `下载中 ${percent}%` });
+    });
+    refreshPathEnv();
   });
 
   function toolVersionText(key) {
@@ -173,7 +386,7 @@ export function useSettings(deps) {
         ['状态', defaultTc.pyocdBin ? '本地已就绪' : '未安装'],
         ['版本', defaultTc.pyocdVersion || '未获取'],
         ['路径', defaultTc.pyocdBin || '未找到'],
-        ['来源', '软件根目录 toolchain/pyocd/']
+        ['来源', '应用数据目录 toolchain/pyocd/（升级后保留）']
       ],
       openocd: [
         ['状态', defaultTc.openocdBin ? '本地已就绪' : '未安装'],
@@ -198,11 +411,13 @@ export function useSettings(deps) {
   return {
     platform, toolchainProfile, config, draft, settingsVisible,
     envReady, installing, installingDefault, defaultTc, dlProgress, toolDetail,
+    toolProgress, pathEnv, pathEnvBusy, defaultToolchainItems,
     isWindows, isLinux, systemDisplayName, systemRuntimeLabel, systemDownloadLabel,
-    envButtonText, envButtonReadyText, defaultInstallButtonText, defaultToolchainHint,
+    envButtonText, envButtonReadyText, defaultInstallButtonText, defaultToolchainHint, defaultToolchainRootDisplay, chooseToolchainRoot, clearToolchainRoot,
     flashMethodModel, autoDetectModel, underResetModel,
     loadConfig, openSettings, closeSettings, saveSettings, resetSettings,
     checkEnv, installEnv, refreshDefaultTc, installDefaultTc,
-    toolVersionText, openToolDetail
+    toolReady, toolProgressText, toolVersionText, openToolDetail,
+    addSystemPathEnv, removeSystemPathEnv
   };
 }

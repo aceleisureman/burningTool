@@ -52,11 +52,66 @@
       <div class="nav-spacer"></div>
       <div class="nav-foot">
         <button class="nf-btn" @click="toggleNav" :title="navCollapsed ? '展开菜单' : '收起菜单'"><el-icon><component :is="navCollapsed ? 'Expand' : 'Fold'" /></el-icon></button>
-        <button class="nf-btn" @click="toggleTheme" :title="theme === 'dark' ? '切换白天' : '切换黑夜'"><el-icon><component :is="theme === 'dark' ? 'Sunny' : 'Moon'" /></el-icon></button>
+        <button class="nf-btn" @click="openThemePicker" :title="'主题：' + (currentPreset && currentPreset.name ? currentPreset.name : '')">
+          <el-icon><component :is="isDark ? 'Moon' : 'Sunny'" /></el-icon>
+        </button>
         <button class="nf-btn" @click="aboutVisible = true" title="关于"><el-icon><info-filled /></el-icon></button>
         <button class="nf-btn" :class="{ active: tool === 'settings' }" @click="openSettings" title="设置"><el-icon><Setting /></el-icon></button>
       </div>
     </nav>
+
+    <!-- 主题配色选择 -->
+    <el-dialog v-model="themePickerVisible" title="选择配色风格" width="560px" align-center class="theme-picker-dialog">
+      <div class="theme-picker">
+        <div class="theme-picker-group">
+          <div class="theme-picker-label">浅色</div>
+          <div class="theme-grid">
+            <button
+              v-for="p in themePresets.filter(t => t.mode === 'light')"
+              :key="p.id"
+              class="theme-card"
+              :class="{ active: theme === p.id }"
+              @click="selectTheme(p.id)"
+            >
+              <div class="theme-swatches">
+                <span v-for="(c, i) in p.swatches" :key="i" class="theme-swatch" :style="{ background: c }"></span>
+              </div>
+              <div class="theme-card-meta">
+                <div class="theme-card-name">{{ p.name }}</div>
+                <div class="theme-card-desc">{{ p.desc }}</div>
+              </div>
+              <span v-if="theme === p.id" class="theme-card-check">✓</span>
+            </button>
+          </div>
+        </div>
+        <div class="theme-picker-group">
+          <div class="theme-picker-label">深色</div>
+          <div class="theme-grid">
+            <button
+              v-for="p in themePresets.filter(t => t.mode === 'dark')"
+              :key="p.id"
+              class="theme-card"
+              :class="{ active: theme === p.id }"
+              @click="selectTheme(p.id)"
+            >
+              <div class="theme-swatches">
+                <span v-for="(c, i) in p.swatches" :key="i" class="theme-swatch" :style="{ background: c }"></span>
+              </div>
+              <div class="theme-card-meta">
+                <div class="theme-card-name">{{ p.name }}</div>
+                <div class="theme-card-desc">{{ p.desc }}</div>
+              </div>
+              <span v-if="theme === p.id" class="theme-card-check">✓</span>
+            </button>
+          </div>
+        </div>
+        <div class="theme-picker-actions">
+          <el-button size="small" @click="toggleTheme">{{ isDark ? '切到浅色默认（清爽薄荷）' : '切到深色默认（深空青）' }}</el-button>
+          <el-button size="small" text @click="cycleTheme">下一套配色</el-button>
+        </div>
+        <div class="theme-picker-tip">点击卡片立即切换并保存；下次启动自动恢复。旧版 light/dark 设置会自动迁移到对应默认方案。</div>
+      </div>
+    </el-dialog>
 
     <el-dialog v-model="aboutVisible" width="400px" align-center :show-close="true" class="about-dialog">
       <div class="about-box">
@@ -171,9 +226,9 @@
                   <div class="fm-head">
                     <span class="fm-label">烧录方式</span>
                     <el-radio-group v-model="flashMethodModel" size="small">
-                      <el-radio-button label="pyocd">pyOCD</el-radio-button>
-                      <el-radio-button label="openocd">OpenOCD</el-radio-button>
-                      <el-radio-button v-if="isWindows" label="keil">Keil</el-radio-button>
+                      <el-radio-button value="pyocd">pyOCD</el-radio-button>
+                      <el-radio-button value="openocd">OpenOCD</el-radio-button>
+                      <el-radio-button v-if="isWindows" value="keil">Keil</el-radio-button>
                     </el-radio-group>
                   </div>
                   <div class="flash-options">
@@ -1175,9 +1230,9 @@
               </el-form-item>
               <el-form-item label="编译方式">
                 <el-radio-group v-model="draft.buildSystem">
-                  <el-radio-button label="auto">自动判断</el-radio-button>
-                  <el-radio-button label="make">Makefile (GCC)</el-radio-button>
-                  <el-radio-button v-if="isWindows" label="keil">Keil uVision5</el-radio-button>
+                  <el-radio-button value="auto">自动判断</el-radio-button>
+                  <el-radio-button value="make">Makefile (GCC)</el-radio-button>
+                  <el-radio-button v-if="isWindows" value="keil">Keil uVision5</el-radio-button>
                 </el-radio-group>
                 <span class="set-hint">自动：有 Makefile 用 GCC，Windows 下有 .uvprojx 才会走 Keil</span>
               </el-form-item>
@@ -1190,8 +1245,8 @@
               </el-form-item>
               <el-form-item label="工具链模式" v-if="draft.buildSystem !== 'keil'">
                 <el-radio-group v-model="draft.toolchainMode">
-                  <el-radio-button label="custom">自定义路径</el-radio-button>
-                  <el-radio-button label="default">使用默认(自动下载)</el-radio-button>
+                  <el-radio-button value="custom">自定义路径</el-radio-button>
+                  <el-radio-button value="default">使用默认(自动下载)</el-radio-button>
                 </el-radio-group>
               </el-form-item>
               <el-form-item label="ARM GCC bin" v-if="draft.buildSystem !== 'keil' && draft.toolchainMode === 'custom'">
@@ -1200,23 +1255,53 @@
               <el-form-item label="make bin" v-if="draft.buildSystem !== 'keil' && draft.toolchainMode === 'custom'">
                 <el-input v-model="draft.makePath" :placeholder="toolchainProfile.placeholders.makePath || 'make 所在 bin 目录'" />
               </el-form-item>
-              <el-form-item label="默认工具链" v-if="draft.buildSystem !== 'keil' && draft.toolchainMode === 'default'">
+                            <el-form-item label="工具链保存目录" v-if="draft.buildSystem !== 'keil' && draft.toolchainMode === 'default'">
+                <div style="display:flex;gap:8px;width:100%;align-items:center;">
+                  <el-input v-model="draft.toolchainRootPath" placeholder="留空=默认应用数据目录（升级后保留）" style="flex:1;" />
+                  <el-button size="small" @click="chooseToolchainRoot">浏览</el-button>
+                  <el-button size="small" text :disabled="!draft.toolchainRootPath" @click="clearToolchainRoot">默认</el-button>
+                </div>
+                <span class="set-hint">当前生效：{{ defaultToolchainRootDisplay }}。修改后请先保存设置，再下载工具链。</span>
+              </el-form-item>
+<el-form-item label="默认工具链" v-if="draft.buildSystem !== 'keil' && draft.toolchainMode === 'default'">
                 <div style="display:flex;flex-direction:column;gap:7px;width:100%;">
                   <div class="set-hint">{{ defaultToolchainHint }}</div>
-                  <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                    <el-tag class="clickable-tag" :type="defaultTc.gccBin ? 'success' : 'info'" size="small" round @click="openToolDetail('gcc')">ARM GCC {{ defaultTc.gccBin ? '已就绪' : '未安装' }} {{ toolVersionText('gcc') }}</el-tag>
-                    <el-tag class="clickable-tag" :type="defaultTc.makeBin ? 'success' : 'info'" size="small" round @click="openToolDetail('make')">make {{ defaultTc.makeBin === 'system' ? '系统提供' : (defaultTc.makeBin ? '已就绪' : '未安装') }} {{ toolVersionText('make') }}</el-tag>
-                    <el-tag class="clickable-tag" :type="defaultTc.pyocdBin ? 'success' : 'info'" size="small" round @click="openToolDetail('pyocd')">pyOCD {{ defaultTc.pyocdBin ? '本地已就绪' : '未安装' }} {{ toolVersionText('pyocd') }}</el-tag>
-                    <el-tag class="clickable-tag" :type="defaultTc.openocdBin ? 'success' : 'info'" size="small" round @click="openToolDetail('openocd')">OpenOCD {{ defaultTc.openocdBin ? '本地已就绪' : '未安装' }} {{ toolVersionText('openocd') }}</el-tag>
-                    <el-tag class="clickable-tag" :type="defaultTc.busybox || (toolchainProfile.commandTools && toolchainProfile.commandTools.mode === 'system') ? 'success' : 'info'" size="small" round @click="openToolDetail('commandTools')">{{ toolchainProfile.commandTools && toolchainProfile.commandTools.mode === 'busybox' ? '编译命令' : '系统命令' }} {{ toolchainProfile.commandTools && toolchainProfile.commandTools.mode === 'busybox' ? (defaultTc.busybox ? '已就绪' : '未安装') : '系统提供' }} {{ toolVersionText('commandTools') }}</el-tag>
+                  <div class="tc-tool-list">
+                    <div
+                      v-for="item in defaultToolchainItems"
+                      :key="item.key"
+                      class="tc-tool-item"
+                      :class="{ ready: item.ready && !item.showProgress, busy: item.showProgress, error: item.tagType === 'danger' }"
+                      @click="openToolDetail(item.key)"
+                    >
+                      <div class="tc-tool-main">
+                        <span class="tc-tool-dot"></span>
+                        <span class="tc-tool-name">{{ item.name }}</span>
+                        <el-tag class="clickable-tag" :type="item.tagType" size="small" round effect="light">{{ item.stateText }}</el-tag>
+                        <span v-if="item.versionText" class="tc-tool-ver">{{ item.versionText }}</span>
+                        <span class="tc-tool-more">详情</span>
+                      </div>
+                      <el-progress
+                        v-if="item.showProgress"
+                        class="tc-tool-progress"
+                        :percentage="item.percent"
+                        :stroke-width="8"
+                        :status="item.progressStatus"
+                      />
+                    </div>
                   </div>
                   <div v-if="dlProgress.active" style="display:flex;align-items:center;gap:8px;">
                     <el-progress :percentage="dlProgress.percent" :stroke-width="10" style="flex:1;" />
-                    <span class="set-hint" style="white-space:nowrap;">{{ dlProgress.label ? ('下载 ' + dlProgress.label) : '准备中' }}</span>
+                    <span class="set-hint" style="white-space:nowrap;">{{ dlProgress.label ? ('当前 ' + dlProgress.label) : '准备中' }}</span>
                   </div>
-                  <div style="display:flex;gap:8px;align-items:center;">
+                  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
                     <el-button type="primary" size="small" :icon="Download" :loading="installingDefault" @click="installDefaultTc(false)">{{ installingDefault ? '安装中…' : defaultInstallButtonText }}</el-button>
                     <el-button size="small" text :disabled="installingDefault" @click="installDefaultTc(true)">强制重新下载</el-button>
+                  </div>
+                  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                    <el-button v-if="!pathEnv.present" type="warning" plain size="small" :loading="pathEnvBusy" :disabled="installingDefault" @click="addSystemPathEnv">设置系统环境变量</el-button>
+                    <el-button v-else type="danger" plain size="small" :loading="pathEnvBusy" :disabled="installingDefault" @click="removeSystemPathEnv">删除系统环境变量</el-button>
+                    <span class="set-hint">{{ pathEnv.supported === false ? '当前系统不支持自动写用户 PATH' : (pathEnv.present ? '用户 PATH 已包含工具链目录' : (pathEnv.partial ? '用户 PATH 仅包含部分工具链目录' : '默认不自动写入系统 PATH')) }}</span>
                   </div>
                 </div>
               </el-form-item>
@@ -1239,9 +1324,9 @@
               <div class="set-card-h"><el-icon><MagicStick /></el-icon><span>烧录</span></div>
               <el-form-item label="烧录方式">
                 <el-radio-group v-model="draft.flashMethod">
-                  <el-radio-button label="pyocd">pyOCD</el-radio-button>
-                  <el-radio-button label="openocd">OpenOCD</el-radio-button>
-                  <el-radio-button v-if="isWindows" label="keil">Keil UV4 下载</el-radio-button>
+                  <el-radio-button value="pyocd">pyOCD</el-radio-button>
+                  <el-radio-button value="openocd">OpenOCD</el-radio-button>
+                  <el-radio-button v-if="isWindows" value="keil">Keil UV4 下载</el-radio-button>
                 </el-radio-group>
                 <span class="set-hint">PWLink/CMSIS-DAP 推荐 pyOCD 或 OpenOCD；Keil 方式仅 Windows 可用。</span>
               </el-form-item>

@@ -23,7 +23,8 @@ const DEFAULT_CONFIG = {
   elfName:    '', // 留空 = 自动在 build/ 下检测 .elf
   autoDetectChip: true, // 烧录前用 pyocd 自动识别芯片，识别不到回退到 targetChip
   connectUnderReset: false, // true = 复位状态下连接(connect under-reset)，解决固件占用 SWD/进低功耗后连不上(需探针 nRST 接到芯片复位脚)
-  toolchainMode: 'custom', // 'custom' = 用上面的自定义路径；'default' = 用软件根目录 toolchain/ 自动下载的
+  toolchainMode: 'custom', // 'custom' = 用上面的自定义路径；'default' = 自动下载到 toolchainRootPath/userData
+  toolchainRootPath: '', // 默认工具链下载保存目录；留空=打包态 userData/toolchain，开发态仓库根 toolchain/
   ghProxy: '', // 可选下载加速镜像前缀，如 https://gh-proxy.com ；留空直连 GitHub
   buildSystem: 'auto', // 'auto' = 按工程文件自动判断；'make' = Makefile(GCC)；'keil' = Keil uVision5(UV4)
   keilUV4Path: String.raw`C:\Keil_v5\UV4\UV4.exe`, // Keil uVision5 的 UV4.exe 路径

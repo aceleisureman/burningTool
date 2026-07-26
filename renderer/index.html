@@ -6,7 +6,18 @@
         content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws: wss:;">
   <title>STM32 工具箱</title>
   <script>
-    try { var _t = localStorage.getItem('ui-theme'); document.documentElement.className = (_t === 'dark' ? 'dark' : 'light'); } catch (e) {}
+    try {
+      var _raw = localStorage.getItem('ui-theme') || 'mint';
+      var _legacy = { light: 'mint', dark: 'cyan' };
+      var _id = _legacy[_raw] || _raw;
+      var _darkIds = { cyan:1, ocean:1, violet:1, ember:1, nord:1, graphite:1 };
+      var _mode = _darkIds[_id] ? 'dark' : 'light';
+      document.documentElement.className = _mode;
+      document.documentElement.setAttribute('data-theme', _id);
+    } catch (e) {
+      document.documentElement.className = 'light';
+      document.documentElement.setAttribute('data-theme', 'mint');
+    }
   </script>
 </head>
 <body>

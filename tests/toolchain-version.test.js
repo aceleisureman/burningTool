@@ -19,10 +19,12 @@ Module._load = function (request, parent, isMain) {
   return origLoad.apply(this, arguments);
 };
 
-const { APPLETS, parseToolVersion, supportedCommandTools, toolchainRoot, mergePathEntries } = require('../src/main/toolchain/toolchain');
+const { APPLETS, parseToolVersion, supportedCommandTools, toolchainRoot, preferredToolchainRoot, legacyToolchainRoot, mergePathEntries } = require('../src/main/toolchain/toolchain');
 
-test('packaged app stores default toolchain under app install root', () => {
-  assert.equal(toolchainRoot(), path.join(tmpExeDir, 'toolchain'));
+test('packaged app stores default toolchain under userData (survives updates)', () => {
+  assert.equal(toolchainRoot(), path.join(tmpUserData, 'toolchain'));
+  assert.equal(preferredToolchainRoot(), path.join(tmpUserData, 'toolchain'));
+  assert.equal(legacyToolchainRoot(), path.join(tmpExeDir, 'toolchain'));
 });
 
 test('parseToolVersion extracts common tool versions', () => {
@@ -52,6 +54,14 @@ test('mergePathEntries prepends unique dirs without duplicates', () => {
   const second = mergePathEntries(first.path, [a, b], ';');
   assert.equal(second.added.length, 0);
   assert.equal(second.path, first.path);
+});
+
+
+
+test('preferredToolchainRoot honors custom toolchainRootPath', () => {
+  const custom = path.join(tmpUserData, 'my-toolchain-store');
+  assert.equal(preferredToolchainRoot({ toolchainRootPath: custom }), path.resolve(custom));
+  assert.equal(preferredToolchainRoot({ toolchainRootPath: '' }), path.join(tmpUserData, 'toolchain'));
 });
 
 test.after(() => {

@@ -20,6 +20,9 @@ const {
   defaultToolchainStatus,
   installToolchain,
   installDefaultToolchain,
+  getSystemPathStatus,
+  syncSystemPath,
+  removeSystemPath,
   installLocalStcgal,
   installLocalEsptool
 } = require('./toolchain/toolchain');
@@ -171,6 +174,10 @@ ipcMain.handle('install-toolchain', async () => {
 });
 
 ipcMain.handle('default-toolchain-status', () => defaultToolchainStatus());
+ipcMain.handle('toolchain-system-path-status', () => getSystemPathStatus());
+ipcMain.handle('toolchain-system-path-add', () => syncSystemPath());
+ipcMain.handle('toolchain-system-path-remove', () => removeSystemPath());
+
 ipcMain.handle('install-default-toolchain', async (_e, opts) => {
   try {
     return await installDefaultToolchain(loadConfig(), opts || {});
