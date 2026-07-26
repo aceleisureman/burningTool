@@ -9,7 +9,7 @@ const viewSource = fs.readFileSync(path.join(root, 'renderer', 'src', 'views', '
 const styles = fs.readFileSync(path.join(root, 'renderer', 'src', 'styles', 'tools', 'flash.css'), 'utf8');
 
 test('sidebar keeps product names for STC and ESP32 while other labels use four Chinese characters', () => {
-  const expected = ['固件烧录', 'StcGal', 'ESP32', '硬件调试', '内存日志', '固件分析', '串口调试', '消息调试', '字模生成'];
+  const expected = ['固件烧录', 'StcGal', 'ESP32', '硬件调试', '内存日志', '固件分析', '串口调试', '消息调试', '字模生成', '校验工具'];
   const navBlock = appSource.slice(appSource.indexOf('<div class="nav-section">工具</div>'), appSource.indexOf('<div class="nav-spacer"></div>'));
   const labels = [...navBlock.matchAll(/<span class="label">([^<]+)<\/span>/g)].map((match) => match[1]);
 

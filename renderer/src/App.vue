@@ -49,7 +49,7 @@
         <el-icon><Grid /></el-icon><span class="label">字模生成</span>
       </button>
       <button class="nav-item" :class="{ active: tool === 'crc' }" @click="tool = 'crc'" title="CRC 校验工具">
-        <el-icon><DataLine /></el-icon><span class="label">CRC校验</span>
+        <el-icon><DataLine /></el-icon><span class="label">校验工具</span>
       </button>
 
       <div class="nav-spacer"></div>
@@ -155,7 +155,7 @@
             <span v-else-if="updateState.status === 'checking'">正在检查更新…</span>
           </div>
         </div>
-        <div class="about-desc">可视化编译烧录 · StcGal · 串口调试 · MQTT 调试 · 字模生成 · CRC 校验</div>
+        <div class="about-desc">可视化编译烧录 · StcGal · 串口调试 · MQTT 调试 · 字模生成 · 校验工具</div>
         <div class="about-divider"></div>
         <div class="about-org">锐新网络科技有限公司</div>
         <div class="about-sub">© 2026 RuiXin Network Technology · 版权所有</div>
