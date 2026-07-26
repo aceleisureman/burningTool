@@ -14,20 +14,6 @@ function getSection() {
   return vscode.workspace.getConfiguration(SECTION);
 }
 
-function pick(vscodeVal, desktopVal, fallback = '') {
-  const v = vscodeVal == null ? '' : String(vscodeVal).trim();
-  if (v) return v;
-  if (desktopVal != null && String(desktopVal).trim() !== '') return String(desktopVal).trim();
-  return fallback;
-}
-
-function pickBool(vscodeVal, desktopVal, fallback) {
-  // VS Code 配置有明确默认值时 get 不会返回 undefined；用 inspect 判断是否用户/工作区显式设置
-  return vscodeVal !== undefined && vscodeVal !== null ? !!vscodeVal : (
-    desktopVal !== undefined && desktopVal !== null ? !!desktopVal : !!fallback
-  );
-}
-
 /**
  * 组装 flash-core 期望的 cfg：
  * VS Code settings 优先，空值回退桌面端 MCU 工具箱 config（含 platformPaths 分平台路径）

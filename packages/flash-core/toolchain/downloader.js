@@ -146,7 +146,7 @@ async function downloadFast(url, dest, onProgress, conns = 8) {
   }
   try {
     await Promise.all(tasks);
-  } catch (e) {
+  } catch (_e) {
     for (const p of parts) { try { fs.unlinkSync(p); } catch {} }
     send('[环境] 分段下载中断，自动改用单连接重试 ...', 'info');
     return downloadFileWithRetry(info.finalUrl, dest, onProgress, 2);

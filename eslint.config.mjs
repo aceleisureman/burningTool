@@ -19,7 +19,7 @@ export default [
   js.configs.recommended,
   ...pluginVue.configs['flat/essential'],
   {
-    files: ['src/**/*.js', 'scripts/**/*.js', 'tests/**/*.js'],
+    files: ['src/**/*.js', 'scripts/**/*.js', 'tests/**/*.js', 'packages/**/*.js', 'plugins/**/*.js'],
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'commonjs',

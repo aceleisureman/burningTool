@@ -264,7 +264,7 @@ async function installDefaultToolchain(cfg = {}, opts = {}) {
   if ((cfg.ghProxy || '').trim()) bus.send(`[环境] 使用下载镜像: ${cfg.ghProxy.trim()}`, 'info');
 
   const before = defaultToolchainStatus();
-  let okGcc = !!before.gccBin, okMake = !!before.makeBin, okPyocd = !!before.pyocdBin, okOpenocd = !!before.openocdBin;
+  // 安装结果以 defaultToolchainStatus() 复检为准
   try {
     // 编译命令(busybox)：仅缺失或强制时安装
     const commandTask = plan.downloads.find((x) => x.key === 'commandTools');
@@ -278,12 +278,12 @@ async function installDefaultToolchain(cfg = {}, opts = {}) {
 
     // ARM GCC：已存在则跳过，避免重复下载 150MB
     const gccTask = plan.downloads.find((x) => x.key === 'gcc');
-    if (!gccTask) {
-      okGcc = true;
-    } else if (!force && before.gccBin) {
-      bus.send(`[环境] ✓ ARM GCC 已存在，跳过下载: ${before.gccBin}`, 'info');
-    } else {
-      okGcc = await downloadAndExtract(gccTask.spec, gccTask.label, path.join(root, 'gcc'), cfg);
+    if (gccTask) {
+      if (!force && before.gccBin) {
+        bus.send(`[环境] ✓ ARM GCC 已存在，跳过下载: ${before.gccBin}`, 'info');
+      } else {
+        await downloadAndExtract(gccTask.spec, gccTask.label, path.join(root, 'gcc'), cfg);
+      }
     }
 
     // make：Windows 下载，mac/Linux 使用系统自带
@@ -292,27 +292,23 @@ async function installDefaultToolchain(cfg = {}, opts = {}) {
       if (!force && before.makeBin && before.makeBin !== 'system') {
         bus.send(`[环境] ✓ make 已存在，跳过下载: ${before.makeBin}`, 'info');
       } else {
-        okMake = await downloadAndExtract(makeTask.spec, makeTask.label, path.join(root, 'make'), cfg);
+        await downloadAndExtract(makeTask.spec, makeTask.label, path.join(root, 'make'), cfg);
       }
     } else {
-      okMake = true;
       const makeSys = plan.system.find((x) => x.key === 'make');
       if (makeSys) bus.send(`[环境] ${PLATFORM_TC.label} 使用系统自带 make: ${makeSys.spec.pathDisplay}`, 'info');
     }
 
     const pyocdTask = plan.downloads.find((x) => x.key === 'pyocd');
-    if (pyocdTask) okPyocd = await installLocalPyocd(force);
-    else okPyocd = true;
+    if (pyocdTask) await installLocalPyocd(force);
 
     const openocdTask = plan.downloads.find((x) => x.key === 'openocd');
     if (openocdTask) {
       if (!force && before.openocdBin) {
         bus.send(`[环境] ✓ OpenOCD 已存在，跳过下载: ${before.openocdBin}`, 'info');
       } else {
-        okOpenocd = await downloadAndExtract(openocdTask.spec, openocdTask.label, path.join(root, 'openocd'), cfg);
+        await downloadAndExtract(openocdTask.spec, openocdTask.label, path.join(root, 'openocd'), cfg);
       }
-    } else {
-      okOpenocd = true;
     }
   } finally {
     bus.sendDownloadProgress('', 100); // 收尾：通知渲染端结束进度

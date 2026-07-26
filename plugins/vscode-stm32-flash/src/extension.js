@@ -1,6 +1,5 @@
 'use strict';
 
-const path = require('path');
 const os = require('os');
 const vscode = require('vscode');
 const {

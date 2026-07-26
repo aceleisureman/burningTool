@@ -86,17 +86,17 @@ export function useSettings(deps) {
     return `${label} 默认下载到 ${rootText}：ARM GCC、OpenOCD、本地 pyOCD；。make 与 rm/mkdir/sh 等命令使用系统自带环境。`;
   });
 
-  async function setFlashMethod(v) { config.flashMethod = v; try { Object.assign(config, await window.api.saveConfig({ flashMethod: v })); } catch (e) {} }
-  async function setAutoDetect(v) { config.autoDetectChip = v; try { Object.assign(config, await window.api.saveConfig({ autoDetectChip: v })); } catch (e) {} }
+  async function setFlashMethod(v) { config.flashMethod = v; try { Object.assign(config, await window.api.saveConfig({ flashMethod: v })); } catch (_e) {} }
+  async function setAutoDetect(v) { config.autoDetectChip = v; try { Object.assign(config, await window.api.saveConfig({ autoDetectChip: v })); } catch (_e) {} }
   const flashMethodModel = computed({ get: () => config.flashMethod || 'pyocd', set: (v) => setFlashMethod(v) });
   const autoDetectModel  = computed({ get: () => config.autoDetectChip !== false, set: (v) => setAutoDetect(v) });
-  async function setUnderReset(v) { config.connectUnderReset = v; try { Object.assign(config, await window.api.saveConfig({ connectUnderReset: v })); } catch (e) {} }
+  async function setUnderReset(v) { config.connectUnderReset = v; try { Object.assign(config, await window.api.saveConfig({ connectUnderReset: v })); } catch (_e) {} }
   const underResetModel  = computed({ get: () => config.connectUnderReset === true, set: (v) => setUnderReset(v) });
 
   async function loadConfig() {
     applyBrowserPlatformFallback();
-    try { platform.value = await window.api.getPlatform(); } catch (e) { applyBrowserPlatformFallback(); }
-    try { Object.assign(toolchainProfile, await window.api.getPlatformToolchain()); } catch (e) { applyBrowserPlatformFallback(); }
+    try { platform.value = await window.api.getPlatform(); } catch (_e) { applyBrowserPlatformFallback(); }
+    try { Object.assign(toolchainProfile, await window.api.getPlatformToolchain()); } catch (_e) { applyBrowserPlatformFallback(); }
     applyBrowserPlatformFallback();
     const cfg = await window.api.getConfig(); Object.assign(config, cfg);
     if (!isWindows.value) {
