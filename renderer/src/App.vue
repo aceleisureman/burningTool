@@ -74,22 +74,25 @@
         <div class="about-ver">版本 v{{ appVersion }}</div>
         <div class="about-update">
           <el-button
-            v-if="updateState.status !== 'downloaded'"
+            v-if="updateState.status !== 'downloaded' && updateState.status !== 'installing'"
             size="small" type="primary" plain
             :loading="updateState.status === 'checking' || updateChecking"
+            :disabled="updateInstalling"
             @click="checkUpdate">
             {{ updateState.status === 'downloading' ? `下载中 ${updateState.percent}%` : '检查更新' }}
           </el-button>
           <el-button
             v-else
             size="small" type="success"
+            :loading="updateState.status === 'installing' || updateInstalling"
             @click="installUpdate">
-            重启安装 v{{ updateState.version }}
+            {{ (updateState.status === 'installing' || updateInstalling) ? '正在退出并安装…' : ('重启安装 v' + updateState.version) }}
           </el-button>
           <div class="about-update-tip">
             <span v-if="updateState.status === 'latest'">已是最新版本</span>
             <span v-else-if="updateState.status === 'downloading'">正在下载新版本 v{{ updateState.version }}…</span>
             <span v-else-if="updateState.status === 'downloaded'">新版本已就绪，点击重启完成更新</span>
+            <span v-else-if="updateState.status === 'installing'">正在关闭占用资源并安装更新…</span>
             <span v-else-if="updateState.status === 'error'" class="about-update-err">{{ updateState.error }}</span>
           </div>
         </div>

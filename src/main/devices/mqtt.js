@@ -118,4 +118,9 @@ function registerMqtt(ipcMain, app, push) {
   });
 }
 
-module.exports = { registerMqtt };
+function closeAllMqtt() {
+  for (const id of Array.from(mqttClients.keys())) mqttCloseId(id);
+  return { ok: true, closed: true };
+}
+
+module.exports = { registerMqtt, closeAllMqtt };

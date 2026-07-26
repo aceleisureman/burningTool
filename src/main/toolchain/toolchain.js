@@ -323,31 +323,52 @@ function collectToolchainPathDirs(status) {
 }
 
 function readWindowsUserPath() {
-  const r = spawnSync('powershell', [
-    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
-    "[Environment]::GetEnvironmentVariable('Path','User')"
-  ], { encoding: 'utf8', timeout: 8000, windowsHide: true });
-  if (r.error || r.status !== 0) {
-    const msg = r.error ? r.error.message : String(r.stderr || '').trim();
-    throw new Error(msg || 'read user PATH failed');
+  // 优先 reg.exe：比冷启动 PowerShell 更稳，避免 spawnSync ETIMEDOUT
+  const r = spawnSync('reg', ['query', 'HKCU\Environment', '/v', 'Path'], {
+    encoding: 'utf8',
+    timeout: 5000,
+    windowsHide: true
+  });
+  if (r.error) throw new Error(r.error.message || 'read user PATH failed');
+  // 未配置 Path 时 reg 返回 1，按空串处理
+  if (r.status !== 0) {
+    const err = String(r.stderr || r.stdout || '');
+    if (/unable to find|找不到|ERROR:\s*The system was unable to find/i.test(err) || r.status === 1) return '';
+    throw new Error(err.trim() || 'read user PATH failed');
   }
-  return String(r.stdout || '').replace(/\r?\n/g, '');
+  const text = String(r.stdout || '');
+  const m = text.match(/Path\s+REG_(?:EXPAND_)?SZ\s+(.+?)\r?\n/i);
+  if (m) return m[1].trim();
+  // 兼容超长行被截断/格式差异：取最后一列
+  for (const line of text.split(/\r?\n/)) {
+    if (/^\s*Path\s+REG_/i.test(line)) {
+      const parts = line.trim().split(/\s+/);
+      // Path, REG_*, value...
+      if (parts.length >= 3) return parts.slice(2).join(' ');
+    }
+  }
+  return '';
 }
 
 function writeWindowsUserPath(newPath) {
-  const r = spawnSync('powershell', [
-    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
-    "[Environment]::SetEnvironmentVariable('Path', $env:BT_NEW_PATH, 'User')"
-  ], {
-    encoding: 'utf8',
-    timeout: 8000,
-    windowsHide: true,
-    env: Object.assign({}, process.env, { BT_NEW_PATH: newPath })
-  });
+  const value = String(newPath || '');
+  // REG_EXPAND_SZ 保留 %VAR% 展开；/d 直接传值，避免 PowerShell 冷启动超时
+  const r = spawnSync(
+    'reg',
+    ['add', 'HKCU\Environment', '/v', 'Path', '/t', 'REG_EXPAND_SZ', '/d', value, '/f'],
+    { encoding: 'utf8', timeout: 8000, windowsHide: true }
+  );
   if (r.error || r.status !== 0) {
-    const msg = r.error ? r.error.message : String(r.stderr || '').trim();
+    const msg = r.error ? r.error.message : String(r.stderr || r.stdout || '').trim();
     throw new Error(msg || 'write user PATH failed');
   }
+  // 尽力广播环境变更（失败不影响注册表已写入）
+  try {
+    spawnSync('powershell', [
+      '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command',
+      "[Environment]::SetEnvironmentVariable('Path',[Environment]::GetEnvironmentVariable('Path','User'),'User')"
+    ], { encoding: 'utf8', timeout: 12000, windowsHide: true });
+  } catch {}
 }
 
 function mergePathEntries(existingPath, dirsToAdd, delimiter) {

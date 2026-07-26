@@ -107,7 +107,21 @@ if (!gotSingleInstanceLock) {
   });
 }
 app.on('window-all-closed', () => app.quit());
-app.on('before-quit', () => { try { httpApi.stop(); } catch {} });
+app.on('before-quit', () => {
+  try { httpApi.stop(); } catch {}
+  try {
+    const serial = require('./devices/serial');
+    if (serial && typeof serial.closeActiveSerial === 'function') serial.closeActiveSerial();
+  } catch {}
+  try {
+    const mqtt = require('./devices/mqtt');
+    if (mqtt && typeof mqtt.closeAllMqtt === 'function') mqtt.closeAllMqtt();
+  } catch {}
+  try {
+    const { killAllRunningProcesses } = require('./toolchain/proc');
+    killAllRunningProcesses('app-before-quit');
+  } catch {}
+});
 
 /* ── 本地 HTTP API：启动 + IPC ────────────────────────── */
 async function startHttpApiFromConfig() {

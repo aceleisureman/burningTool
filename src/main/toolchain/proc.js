@@ -4,11 +4,46 @@ const { spawn } = require('child_process');
 const { StringDecoder } = require('string_decoder');
 const bus = require('../core/bus');
 
+/* 活动子进程登记：更新安装 / 退出时统一清理，避免进程残留钉住安装器 */
+const activeChildren = new Set();
+
+function trackChild(child) {
+  if (!child) return () => {};
+  activeChildren.add(child);
+  const untrack = () => { activeChildren.delete(child); };
+  child.once('close', untrack);
+  child.once('error', untrack);
+  return untrack;
+}
+
+function killChildTree(child) {
+  if (!child) return;
+  try {
+    if (process.platform === 'win32' && child.pid) {
+      spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+    } else {
+      child.kill('SIGKILL');
+    }
+  } catch {}
+}
+
+function killAllRunningProcesses(reason = '') {
+  const list = Array.from(activeChildren);
+  for (const child of list) killChildTree(child);
+  activeChildren.clear();
+  return { killed: list.length, reason: reason || '' };
+}
+
+function activeProcessCount() {
+  return activeChildren.size;
+}
+
 /* ── 通用进程执行：按行流式输出 + 可选清洗器 + Promise(退出码) ── */
 function runProcess(cmd, args, options = {}) {
   const { clean, capture, timeoutMs, ...spawnOpts } = options;
   return new Promise((resolve) => {
     const child = spawn(cmd, args, spawnOpts);
+    trackChild(child);
     let captured = '';
     let done = false;
     let timer = null;
@@ -46,10 +81,7 @@ function runProcess(cmd, args, options = {}) {
       resolve(result);
     };
     const killProcessTree = () => {
-      try {
-        if (process.platform === 'win32' && child.pid) spawn('taskkill', ['/pid', String(child.pid), '/T', '/F']);
-        else child.kill('SIGKILL');
-      } catch {}
+      killChildTree(child);
     };
     const so = makeSink(), se = makeSink();
     if (timeoutMs) {
@@ -82,6 +114,7 @@ function runCapture(cmd, args, options = {}) {
     let out = '';
     let done = false;
     const child = spawn(cmd, args, spawnOpts);
+    trackChild(child);
     // 同 runProcess：按字节流累积解码，防止中文等多字节字符跨 chunk 边界出现乱码
     const outDecoder = new StringDecoder('utf8');
     const errDecoder = new StringDecoder('utf8');
@@ -90,10 +123,7 @@ function runCapture(cmd, args, options = {}) {
     if (timeoutMs) {
       timer = setTimeout(() => {
         // 超时：杀掉进程树（Windows 用 taskkill /T 连子进程一起杀，释放调试探针）
-        try {
-          if (process.platform === 'win32' && child.pid) spawn('taskkill', ['/pid', String(child.pid), '/T', '/F']);
-          else child.kill('SIGKILL');
-        } catch {}
+        killChildTree(child);
         finish({ code: -2, out, timedOut: true });
       }, timeoutMs);
     }
@@ -104,4 +134,4 @@ function runCapture(cmd, args, options = {}) {
   });
 }
 
-module.exports = { runProcess, runCapture };
+module.exports = { runProcess, runCapture, killAllRunningProcesses, activeProcessCount };

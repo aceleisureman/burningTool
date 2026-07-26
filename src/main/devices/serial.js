@@ -89,4 +89,14 @@ function registerSerial(ipcMain, push) {
   });
 }
 
-module.exports = { registerSerial };
+async function closeActiveSerial() {
+  try {
+    if (activeSerial && activeSerial.isOpen) {
+      await new Promise((r) => activeSerial.close(() => r()));
+    }
+  } catch {}
+  activeSerial = null;
+  return { ok: true };
+}
+
+module.exports = { registerSerial, closeActiveSerial };
