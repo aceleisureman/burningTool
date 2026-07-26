@@ -1,0 +1,253 @@
+{
+  "name": "mcu-assistant",
+  "displayName": "MCU-Assistant",
+  "description": "MCU 助手 · STM32 编译与烧录（Makefile / Keil / pyOCD / OpenOCD）",
+  "version": "0.1.10",
+  "publisher": "leisureman",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onView:stm32Flash.sidebar",
+    "onCommand:stm32Flash.selectProject",
+    "onCommand:stm32Flash.openRecent",
+    "onCommand:stm32Flash.build",
+    "onCommand:stm32Flash.flash",
+    "onCommand:stm32Flash.buildAndFlash",
+    "onCommand:stm32Flash.generateMakefile",
+    "onCommand:stm32Flash.checkProbe",
+    "onCommand:stm32Flash.readChipInfo",
+    "onCommand:stm32Flash.cancel",
+    "onCommand:stm32Flash.openOutput",
+    "onCommand:stm32Flash.openSettings"
+  ],
+  "main": "./src/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "stm32Flash.selectProject",
+        "title": "STM32: 选择工程目录",
+        "category": "STM32 Flash",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "stm32Flash.openRecent",
+        "title": "STM32: 历史工程",
+        "category": "STM32 Flash",
+        "icon": "$(history)"
+      },
+      {
+        "command": "stm32Flash.build",
+        "title": "STM32: 编译",
+        "category": "STM32 Flash",
+        "icon": "$(play)"
+      },
+      {
+        "command": "stm32Flash.flash",
+        "title": "STM32: 烧录",
+        "category": "STM32 Flash",
+        "icon": "$(arrow-up)"
+      },
+      {
+        "command": "stm32Flash.buildAndFlash",
+        "title": "STM32: 一键编译烧录",
+        "category": "STM32 Flash",
+        "icon": "$(run-all)"
+      },
+      {
+        "command": "stm32Flash.generateMakefile",
+        "title": "STM32: 生成 Makefile",
+        "category": "STM32 Flash"
+      },
+      {
+        "command": "stm32Flash.checkProbe",
+        "title": "STM32: 检测烧录器",
+        "category": "STM32 Flash"
+      },
+      {
+        "command": "stm32Flash.readChipInfo",
+        "title": "STM32: 读取芯片信息",
+        "category": "STM32 Flash"
+      },
+      {
+        "command": "stm32Flash.cancel",
+        "title": "STM32: 取消当前任务",
+        "category": "STM32 Flash"
+      },
+      {
+        "command": "stm32Flash.openOutput",
+        "title": "STM32: 打开日志",
+        "category": "STM32 Flash"
+      },
+      {
+        "command": "stm32Flash.openSettings",
+        "title": "STM32: 打开设置",
+        "category": "STM32 Flash"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "stm32Flash",
+          "title": "MCU-Assistant",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "stm32Flash": [
+        {
+          "type": "webview",
+          "id": "stm32Flash.sidebar",
+          "name": "固件烧录"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "stm32Flash.buildAndFlash",
+          "when": "view == stm32Flash.sidebar",
+          "group": "navigation@1"
+        },
+        {
+          "command": "stm32Flash.openOutput",
+          "when": "view == stm32Flash.sidebar",
+          "group": "navigation@2"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "MCU-Assistant",
+      "properties": {
+        "stm32Flash.projectDir": {
+          "type": "string",
+          "default": "",
+          "description": "手动指定的工程目录（仅当 VS Code 未打开工作区时作为回退；默认优先使用当前工作区）"
+        },
+        "stm32Flash.targetChip": {
+          "type": "string",
+          "default": "stm32f103c8",
+          "description": "目标芯片（pyOCD target id），自动识别失败时回退"
+        },
+        "stm32Flash.flashMethod": {
+          "type": "string",
+          "enum": [
+            "pyocd",
+            "openocd",
+            "keil"
+          ],
+          "default": "pyocd",
+          "description": "烧录方式"
+        },
+        "stm32Flash.buildSystem": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "make",
+            "keil"
+          ],
+          "default": "auto",
+          "description": "编译方式"
+        },
+        "stm32Flash.autoDetectChip": {
+          "type": "boolean",
+          "default": true,
+          "description": "烧录前用 pyOCD 自动识别芯片"
+        },
+        "stm32Flash.connectUnderReset": {
+          "type": "boolean",
+          "default": false,
+          "description": "复位状态下连接（需探针 nRST 接芯片复位脚）"
+        },
+        "stm32Flash.elfName": {
+          "type": "string",
+          "default": "",
+          "description": "固件文件名（留空则自动在 build/ 下查找 .elf/.axf/.hex）"
+        },
+        "stm32Flash.pyocdPath": {
+          "type": "string",
+          "default": "",
+          "description": "pyocd 可执行文件路径（空=自动解析）"
+        },
+        "stm32Flash.openocdPath": {
+          "type": "string",
+          "default": "",
+          "description": "openocd 可执行文件路径（空=自动解析）"
+        },
+        "stm32Flash.openocdInterface": {
+          "type": "string",
+          "default": "interface/cmsis-dap.cfg",
+          "description": "OpenOCD 接口配置文件"
+        },
+        "stm32Flash.armGccPath": {
+          "type": "string",
+          "default": "",
+          "description": "ARM GCC bin 目录"
+        },
+        "stm32Flash.makePath": {
+          "type": "string",
+          "default": "",
+          "description": "make 所在目录"
+        },
+        "stm32Flash.keilUV4Path": {
+          "type": "string",
+          "default": "C:\\\\Keil_v5\\\\UV4\\\\UV4.exe",
+          "description": "Keil UV4.exe 路径（仅 Windows）"
+        },
+        "stm32Flash.keilRebuild": {
+          "type": "boolean",
+          "default": false,
+          "description": "Keil 全量重新编译（-z）"
+        },
+        "stm32Flash.cubeMxPath": {
+          "type": "string",
+          "default": "",
+          "description": "STM32CubeMX 可执行文件路径"
+        },
+        "stm32Flash.toolchainRootPath": {
+          "type": "string",
+          "default": "",
+          "description": "工具链根目录。留空则与 MCU 工具箱共用：Windows %APPDATA%\\\\stm32-flasher\\\\toolchain，macOS ~/Library/Application Support/stm32-flasher/toolchain，Linux ~/.config/stm32-flasher/toolchain（开发态也可回退仓库 toolchain/）"
+        },
+        "stm32Flash.ghProxy": {
+          "type": "string",
+          "default": "",
+          "description": "GitHub 下载镜像前缀，如 https://gh-proxy.com（未配置时回退 MCU 工具箱设置）"
+        },
+        "stm32Flash.toolchainMode": {
+          "type": "string",
+          "enum": [
+            "custom",
+            "default"
+          ],
+          "default": "default",
+          "description": "default=优先共用目录内已安装工具链；custom=优先使用上方自定义路径。未配置时回退 MCU 工具箱设置"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "lint": "node -e \"console.log('ok')\"",
+    "package": "npx --yes @vscode/vsce package --no-dependencies --allow-missing-repository"
+  },
+  "dependencies": {},
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aceleisureman/burningTool"
+  },
+  "author": {
+    "name": "锐新网络科技有限公司",
+    "email": "banxiabk@gmail.com"
+  },
+  "qna": "marketplace",
+  "bugs": {
+    "url": "https://github.com/aceleisureman/burningTool/issues",
+    "email": "banxiabk@gmail.com"
+  },
+  "homepage": "https://github.com/aceleisureman/burningTool"
+}

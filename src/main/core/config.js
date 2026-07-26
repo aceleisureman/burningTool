@@ -72,7 +72,9 @@ const DEFAULT_CONFIG = {
     flashOffset: '0x0',
     firmwarePath: '',
     parts: [],
-    partMode: false
+    partMode: false,
+    presets: [],
+    activePresetId: ''
   }, // ESP32/ESP8266 esptool 烧录配置
   platformPaths: {}, // 分平台路径配置 { windows|macos|linux: { armGccPath, makePath, pyocdPath, cubeMxPath, keilUV4Path } }
   serialQuickCmds: [], // 旧版：扁平快捷指令列表（兼容迁移用）

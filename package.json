@@ -20,7 +20,9 @@
     "dist:mac-all": "vite build && electron-builder --mac --universal",
     "dist:linux": "vite build && electron-builder --linux",
     "dist:all": "vite build && electron-builder --win --mac --linux",
-    "check": "npm test && npm run lint && npm run build:renderer"
+    "check": "npm test && npm run lint && npm run build:renderer",
+    "ext:sync": "node scripts/sync-ext-vendor.js",
+    "ext:package": "node scripts/package-ext.js"
   },
   "build": {
     "appId": "com.ruixin.mcutoolbox",
@@ -38,6 +40,7 @@
     },
     "files": [
       "src/**/*",
+      "packages/flash-core/**/*",
       "renderer/dist/**/*",
       "assets/**/*",
       "!resources/**",
@@ -118,6 +121,7 @@
     "electron@35.7.5": true
   },
   "dependencies": {
+    "@mcu-toolbox/flash-core": "file:packages/flash-core",
     "electron-updater": "^6.8.9",
     "mqtt": "^5.15.1",
     "serialport": "^13.0.0"

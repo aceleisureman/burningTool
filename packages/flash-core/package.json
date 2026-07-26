@@ -1,0 +1,20 @@
+{
+  "name": "@mcu-toolbox/flash-core",
+  "version": "1.0.0",
+  "description": "STM32 compile/flash shared core for MCU toolbox and VS Code extension",
+  "main": "index.js",
+  "type": "commonjs",
+  "exports": {
+    ".": "./index.js",
+    "./core/*": "./core/*",
+    "./flash/*": "./flash/*",
+    "./toolchain/*": "./toolchain/*"
+  },
+  "files": [
+    "core",
+    "flash",
+    "toolchain",
+    "index.js"
+  ],
+  "license": "UNLICENSED"
+}

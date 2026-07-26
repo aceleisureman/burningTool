@@ -78,3 +78,17 @@ test('resolveFlashParts rejects non-.bin firmware', () => {
   assert.equal(r.ok, false);
   assert.match(r.error, /\.bin/);
 });
+
+
+test('ESP page supports multi-bin presets and selectable parts', () => {
+  const view = fs.readFileSync(path.join(__dirname, '../renderer/src/views/Esp32View.vue'), 'utf8');
+  const composable = fs.readFileSync(path.join(__dirname, '../renderer/src/composables/useEsp32.js'), 'utf8');
+  assert.match(view, /保存方案/);
+  assert.match(view, /applyEspPreset/);
+  assert.match(view, /toggleEspPart/);
+  assert.match(view, /ESP8266 多 bin/);
+  assert.match(composable, /function saveEspPreset/);
+  assert.match(composable, /selectedEspParts\(\)/);
+  assert.match(composable, /enabled !== false/);
+  assert.match(composable, /presets:/);
+});

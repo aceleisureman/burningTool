@@ -39,3 +39,7 @@ assets/icons/_fullbleed_backup/
 
 # Vite-generated temporary config snapshots
 vite.config.mjs.timestamp-*.mjs
+
+# VS Code 扩展打包产物与 vendor 拷贝（源在 packages/flash-core）
+*.vsix
+plugins/**/vendor/

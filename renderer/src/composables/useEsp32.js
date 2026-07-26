@@ -53,6 +53,9 @@ export function useEsp32(deps = {}) {
     firmwareName: '',
     firmwareSize: 0,
     parts: [],
+    presets: [],
+    activePresetId: '',
+    presetName: '',
     toolOk: false,
     toolVersion: '',
     toolError: '',
@@ -66,7 +69,7 @@ export function useEsp32(deps = {}) {
   });
 
   const espHasFirmware = computed(() => esp32.partMode
-    ? esp32.parts.some((p) => p && p.path)
+    ? selectedEspParts().length > 0
     : !!esp32.firmwarePath);
   const espCanFlash = computed(() => !!esp32.portPath && espHasFirmware.value && !esp32.busy);
   const espStatusKind = computed(() => {
@@ -90,6 +93,32 @@ export function useEsp32(deps = {}) {
     return `${(size / 1024).toFixed(1)} KB`;
   }
   const espFirmwareSizeLabel = computed(() => formatSize(esp32.firmwareSize));
+
+
+  function makePart(p = {}) {
+    return {
+      offset: p.offset || '0x0',
+      path: p.path || '',
+      name: p.name || (p.path ? baseName(p.path) : ''),
+      size: Number(p.size) || 0,
+      enabled: p.enabled !== false,
+    };
+  }
+
+  function makePreset(p = {}) {
+    return {
+      id: p.id || (`esp-preset-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`),
+      name: String(p.name || '未命名方案').trim() || '未命名方案',
+      chip: p.chip || '',
+      parts: Array.isArray(p.parts) ? p.parts.map(makePart) : [],
+    };
+  }
+
+  function selectedEspParts() {
+    return esp32.parts.filter((p) => p && p.path && p.enabled !== false);
+  }
+
+  const espSelectedPartCount = computed(() => selectedEspParts().length);
 
   function espPortLabel(p) {
     const sub = portSubLabel(p);
@@ -129,9 +158,98 @@ export function useEsp32(deps = {}) {
     persistEsp32Config();
   }
 
-  function addEspPart() {
-    esp32.parts.push({ offset: '0x10000', path: '', name: '', size: 0 });
+  function addEspPart(part = {}) {
+    const defaults = esp32.chip === 'esp8266'
+      ? { offset: esp32.parts.length ? '0x1000' : '0x0' }
+      : { offset: esp32.parts.length ? '0x10000' : '0x1000' };
+    esp32.parts.push(makePart({ ...defaults, ...part }));
     persistEsp32Config();
+  }
+
+  function toggleEspPart(i, enabled) {
+    if (!esp32.parts[i]) return;
+    esp32.parts[i].enabled = enabled !== false;
+    persistEsp32Config();
+  }
+
+  function setAllEspPartsEnabled(enabled) {
+    esp32.parts.forEach((p) => { if (p) p.enabled = !!enabled; });
+    persistEsp32Config();
+  }
+
+  function applyEspPartTemplate(kind = 'esp8266') {
+    const templates = {
+      esp8266_single: [makePart({ offset: '0x0', enabled: true })],
+      esp8266_classic: [
+        makePart({ offset: '0x0', enabled: true }),
+        makePart({ offset: '0x1000', enabled: true }),
+        makePart({ offset: '0x7e000', enabled: false }),
+      ],
+      esp32_standard: [
+        makePart({ offset: '0x1000', enabled: true }),
+        makePart({ offset: '0x8000', enabled: true }),
+        makePart({ offset: '0x10000', enabled: true }),
+      ],
+    };
+    const key = kind === 'esp32' ? 'esp32_standard'
+      : kind === 'esp8266_single' ? 'esp8266_single'
+      : kind === 'esp8266_classic' ? 'esp8266_classic'
+      : (esp32.chip === 'esp8266' ? 'esp8266_classic' : 'esp32_standard');
+    esp32.partMode = true;
+    esp32.parts = templates[key].map(makePart);
+    persistEsp32Config();
+    ElMessage.success('已套用分区模板，请分别选择 .bin');
+  }
+
+  function saveEspPreset(name) {
+    const label = String(name || esp32.presetName || '').trim();
+    if (!label) { ElMessage.warning('请输入方案名称'); return false; }
+    const parts = esp32.parts.filter((p) => p && (p.path || p.offset)).map(makePart);
+    if (!parts.length) { ElMessage.warning('当前没有可保存的分区'); return false; }
+    const existing = esp32.presets.find((p) => p.id === esp32.activePresetId)
+      || esp32.presets.find((p) => p.name === label);
+    if (existing) {
+      existing.name = label;
+      existing.chip = esp32.chip;
+      existing.parts = parts.map(makePart);
+      esp32.activePresetId = existing.id;
+    } else {
+      const preset = makePreset({ name: label, chip: esp32.chip, parts });
+      esp32.presets.unshift(preset);
+      esp32.activePresetId = preset.id;
+    }
+    if (esp32.presets.length > 20) esp32.presets.length = 20;
+    esp32.presetName = label;
+    persistEsp32Config();
+    ElMessage.success('方案已保存: ' + label);
+    return true;
+  }
+
+  function applyEspPreset(id) {
+    const preset = esp32.presets.find((p) => p.id === id);
+    if (!preset) { ElMessage.warning('方案不存在'); return; }
+    esp32.partMode = true;
+    esp32.activePresetId = preset.id;
+    esp32.presetName = preset.name;
+    esp32.parts = (preset.parts || []).map(makePart);
+    if (preset.chip && preset.chip !== 'auto') esp32.chip = preset.chip;
+    persistEsp32Config();
+    ElMessage.success('已加载方案: ' + preset.name);
+  }
+
+  function deleteEspPreset(id) {
+    const target = id || esp32.activePresetId;
+    if (!target) { ElMessage.warning('未选择方案'); return; }
+    const idx = esp32.presets.findIndex((p) => p.id === target);
+    if (idx < 0) return;
+    const name = esp32.presets[idx].name;
+    esp32.presets.splice(idx, 1);
+    if (esp32.activePresetId === target) {
+      esp32.activePresetId = '';
+      esp32.presetName = '';
+    }
+    persistEsp32Config();
+    ElMessage.success('已删除方案: ' + name);
   }
 
   function removeEspPart(i) {
@@ -195,8 +313,12 @@ export function useEsp32(deps = {}) {
       afterReset: esp32.afterReset,
       eraseBeforeWrite: esp32.eraseBeforeWrite
     };
-    if (esp32.partMode) opts.parts = esp32.parts.filter((p) => p && p.path).map((p) => ({ offset: p.offset, path: p.path }));
-    else { opts.firmwarePath = esp32.firmwarePath; opts.flashOffset = esp32.flashOffset; }
+    if (esp32.partMode) {
+      opts.parts = selectedEspParts().map((p) => ({ offset: p.offset, path: p.path }));
+    } else {
+      opts.firmwarePath = esp32.firmwarePath;
+      opts.flashOffset = esp32.flashOffset;
+    }
     return Object.assign(opts, extra);
   }
 
@@ -251,7 +373,14 @@ export function useEsp32(deps = {}) {
           partMode: esp32.partMode,
           flashOffset: esp32.flashOffset,
           firmwarePath: esp32.firmwarePath,
-          parts: esp32.parts.map((p) => ({ offset: p.offset, path: p.path }))
+          parts: esp32.parts.map((p) => ({
+            offset: p.offset,
+            path: p.path,
+            name: p.name || '',
+            enabled: p.enabled !== false,
+          })),
+          presets: esp32.presets.map((p) => makePreset(p)),
+          activePresetId: esp32.activePresetId || '',
         }
       }).catch(() => {});
     } catch (_e) {}
@@ -275,9 +404,15 @@ export function useEsp32(deps = {}) {
         flashOffset: saved.flashOffset || '0x0',
         firmwarePath: saved.firmwarePath || '',
         firmwareName: saved.firmwarePath ? baseName(saved.firmwarePath) : '',
-        parts: Array.isArray(saved.parts)
-          ? saved.parts.map((p) => ({ offset: p.offset || '0x0', path: p.path || '', name: p.path ? baseName(p.path) : '', size: 0 }))
-          : []
+        parts: Array.isArray(saved.parts) ? saved.parts.map(makePart) : [],
+        presets: Array.isArray(saved.presets) ? saved.presets.map(makePreset) : [],
+        activePresetId: saved.activePresetId || '',
+        presetName: (() => {
+          const cur = Array.isArray(saved.presets)
+            ? saved.presets.find((p) => p && p.id === saved.activePresetId)
+            : null;
+          return cur && cur.name ? cur.name : '';
+        })(),
       });
     } catch (_e) {}
   }
@@ -289,8 +424,9 @@ export function useEsp32(deps = {}) {
 
   return {
     esp32, ESP_CHIPS, ESP_BAUDS, ESP_FLASH_MODES, ESP_FLASH_FREQS, ESP_FLASH_SIZES, ESP_BEFORE, ESP_AFTER,
-    espCanFlash, espHasFirmware, espStatusKind, espStatusText, espFirmwareLabel, espFirmwareSizeLabel,
+    espCanFlash, espHasFirmware, espSelectedPartCount, espStatusKind, espStatusText, espFirmwareLabel, espFirmwareSizeLabel,
     persistEsp32Config, refreshEspPorts, pickEspPort, selectEspFirmware, addEspPart, removeEspPart, selectEspPartFile,
+    toggleEspPart, setAllEspPartsEnabled, applyEspPartTemplate, saveEspPreset, applyEspPreset, deleteEspPreset,
     checkEspTool, installEspTool, doEspFlash, doEspErase, doEspReadMac, espPortLabel
   };
 }

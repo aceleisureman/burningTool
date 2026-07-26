@@ -36,7 +36,7 @@
                 </div>
               </div>
 
-              <div class="ops-section stc-grid">
+              <div class="ops-section stc-grid stc-grid-esp">
                 <div class="stc-card">
                   <div class="stc-card-h"><el-icon><Cpu /></el-icon><span>芯片与串口</span></div>
                   <div class="field"><label>芯片型号</label>
@@ -75,55 +75,102 @@
                   </div>
                 </div>
 
+                <div class="stc-card">
+                  <div class="stc-card-h"><el-icon><MagicStick /></el-icon><span>Flash 参数</span></div>
+                  <div class="field"><label>模式 / 频率 / 大小</label>
+                    <div class="stc-inline">
+                      <el-select v-model="esp32.flashMode" style="flex:1;min-width:0;" @change="persistEsp32Config">
+                        <el-option v-for="m in ESP_FLASH_MODES" :key="m" :label="m" :value="m" />
+                      </el-select>
+                      <el-select v-model="esp32.flashFreq" style="flex:1;min-width:0;" @change="persistEsp32Config">
+                        <el-option v-for="f in ESP_FLASH_FREQS" :key="f" :label="f" :value="f" />
+                      </el-select>
+                      <el-select v-model="esp32.flashSize" style="flex:1;min-width:0;" @change="persistEsp32Config">
+                        <el-option v-for="s in ESP_FLASH_SIZES" :key="s" :label="s" :value="s" />
+                      </el-select>
+                    </div>
+                  </div>
+                  <div class="field"><label>选项</label>
+                    <el-checkbox v-model="esp32.eraseBeforeWrite" size="small" @change="persistEsp32Config">烧录前先擦除整片（--erase-all）</el-checkbox>
+                  </div>
+                </div>
+              </div>
+
+              <div class="ops-section esp-fw-row">
                 <div class="stc-card stc-file-card">
                   <div class="stc-card-h">
                     <el-icon><Document /></el-icon><span>固件镜像</span>
                     <div class="spacer"></div>
-                    <el-checkbox v-model="esp32.partMode" size="small" @change="persistEsp32Config">多 offset 分区</el-checkbox>
+                    <el-checkbox v-model="esp32.partMode" size="small" @change="persistEsp32Config">多 bin 分区</el-checkbox>
                   </div>
                   <template v-if="!esp32.partMode">
-                    <div class="stc-file-pick">
-                      <el-button type="primary" :icon="FolderOpened" @click="selectEspFirmware">选择 .bin</el-button>
-                      <div class="stc-file-meta">
-                        <b>{{ espFirmwareLabel }}</b>
-                        <span>{{ esp32.firmwarePath || '单合并镜像：merged bin（含 bootloader/分区表/app）' }}</span>
+                    <div class="esp-single-pick">
+                      <div class="stc-file-pick">
+                        <el-button type="primary" :icon="FolderOpened" @click="selectEspFirmware">选择 .bin</el-button>
+                        <div class="stc-file-meta">
+                          <b>{{ espFirmwareLabel }}</b>
+                          <span>{{ esp32.firmwarePath || '单合并镜像：merged bin（含 bootloader/分区表/app）' }}</span>
+                        </div>
+                        <el-tag effect="plain" round>{{ espFirmwareSizeLabel }}</el-tag>
                       </div>
-                      <el-tag effect="plain" round>{{ espFirmwareSizeLabel }}</el-tag>
+                      <div class="field esp-offset"><label>烧录地址 offset</label>
+                        <el-input v-model="esp32.flashOffset" placeholder="如 0x0 / 0x10000" @change="persistEsp32Config" />
+                      </div>
                     </div>
-                    <div class="field"><label>烧录地址 offset</label>
-                      <el-input v-model="esp32.flashOffset" placeholder="如 0x0（合并 bin）或 0x10000（仅 app）" @change="persistEsp32Config" />
-                    </div>
+                    <div class="set-hint">ESP8266 单文件通常 offset=0x0；多 bin 请开启「多 bin 分区」。</div>
                   </template>
                   <template v-else>
-                    <div v-for="(p, i) in esp32.parts" :key="i" class="stc-inline" style="margin-bottom:8px;align-items:center;">
-                      <el-input v-model="p.offset" placeholder="offset 如 0x1000" style="width:130px;" @change="persistEsp32Config" />
-                      <el-button :icon="FolderOpened" @click="selectEspPartFile(i)">{{ p.name || '选择 .bin' }}</el-button>
-                      <el-button text :icon="Delete" @click="removeEspPart(i)" />
+                    <div class="esp-preset-bar">
+                      <el-select
+                        v-model="esp32.activePresetId"
+                        clearable
+                        filterable
+                        placeholder="选择已保存方案"
+                        style="flex:1;"
+                        @change="(id) => id && applyEspPreset(id)"
+                      >
+                        <el-option
+                          v-for="item in esp32.presets"
+                          :key="item.id"
+                          :label="item.name + (item.chip ? ` · ${item.chip}` : '')"
+                          :value="item.id"
+                        />
+                      </el-select>
+                      <el-input v-model="esp32.presetName" placeholder="方案名称，如 8266-OTA" style="width:160px;" @keyup.enter="saveEspPreset()" />
+                      <el-button type="primary" size="small" @click="saveEspPreset()">保存方案</el-button>
+                      <el-button size="small" :disabled="!esp32.activePresetId" @click="deleteEspPreset()">删除</el-button>
                     </div>
-                    <el-button :icon="Plus" size="small" @click="addEspPart">添加分区</el-button>
-                    <div class="set-hint">常见布局：0x1000 bootloader · 0x8000 partition-table · 0x10000 app（ESP32-C3/S3 的 bootloader 多为 0x0，以你的工程为准）。</div>
-                  </template>
-                </div>
-              </div>
 
-              <div class="ops-section stc-advanced">
-                <div class="stc-card compact">
-                  <div class="stc-card-h"><el-icon><MagicStick /></el-icon><span>Flash 参数</span></div>
-                  <div class="stc-inline">
-                    <el-select v-model="esp32.flashMode" style="flex:1;" @change="persistEsp32Config">
-                      <el-option v-for="m in ESP_FLASH_MODES" :key="m" :label="`mode ${m}`" :value="m" />
-                    </el-select>
-                    <el-select v-model="esp32.flashFreq" style="flex:1;" @change="persistEsp32Config">
-                      <el-option v-for="f in ESP_FLASH_FREQS" :key="f" :label="`freq ${f}`" :value="f" />
-                    </el-select>
-                    <el-select v-model="esp32.flashSize" style="flex:1;" @change="persistEsp32Config">
-                      <el-option v-for="s in ESP_FLASH_SIZES" :key="s" :label="`size ${s}`" :value="s" />
-                    </el-select>
-                  </div>
-                </div>
-                <div class="stc-card compact">
-                  <div class="stc-card-h"><el-icon><DataAnalysis /></el-icon><span>选项</span></div>
-                  <el-checkbox v-model="esp32.eraseBeforeWrite" size="small" @change="persistEsp32Config">烧录前先擦除整片（--erase-all）</el-checkbox>
+                    <div class="esp-template-bar">
+                      <span class="set-hint" style="margin:0;">模板：</span>
+                      <el-button size="small" plain @click="applyEspPartTemplate('esp8266_single')">ESP8266 单 app</el-button>
+                      <el-button size="small" plain @click="applyEspPartTemplate('esp8266_classic')">ESP8266 多 bin</el-button>
+                      <el-button size="small" plain @click="applyEspPartTemplate('esp32')">ESP32 标准</el-button>
+                      <div class="spacer"></div>
+                      <el-button size="small" text @click="setAllEspPartsEnabled(true)">全选</el-button>
+                      <el-button size="small" text @click="setAllEspPartsEnabled(false)">全不选</el-button>
+                      <el-tag size="small" effect="plain" round>已选 {{ espSelectedPartCount }}/{{ esp32.parts.length }}</el-tag>
+                    </div>
+
+                    <div v-if="!esp32.parts.length" class="set-hint">还没有分区，先添加或套用模板。</div>
+                    <div v-else class="esp-parts-grid">
+                      <div v-for="(p, i) in esp32.parts" :key="i" class="esp-part-row" :class="{ off: p.enabled === false }">
+                        <el-checkbox
+                          :model-value="p.enabled !== false"
+                          @change="(v) => toggleEspPart(i, v)"
+                        />
+                        <el-input v-model="p.offset" placeholder="offset 如 0x0" style="width:118px;" @change="persistEsp32Config" />
+                        <el-button class="esp-part-file" :icon="FolderOpened" @click="selectEspPartFile(i)">
+                          {{ p.name || '选择 .bin' }}
+                        </el-button>
+                        <el-button text :icon="Delete" @click="removeEspPart(i)" />
+                      </div>
+                    </div>
+                    <el-button :icon="Plus" size="small" @click="addEspPart()">添加分区</el-button>
+                    <div class="set-hint">
+                      勾选的分区才会参与烧录。ESP8266 常见：0x0 boot/app · 0x1000 user1；ESP32 常见：0x1000 bootloader · 0x8000 partition · 0x10000 app。
+                    </div>
+                  </template>
                 </div>
               </div>
 

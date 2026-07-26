@@ -1,8 +1,21 @@
 // 加载 polyfill（install() 内部用 setImmediate 延迟执行，
 // 先让 Electron 二进制 patch require('electron')，主进程代码首次 require 拿到真实 API）
 require('./electron-api');
+const path = require('path');
 const { app, BrowserWindow } = require('electron');
-const { flushSaveConfig } = require('./core/config');
+
+// 共享 flash-core：注入路径与配置加载器（必须在 require 领域模块前完成）
+const { setPathsContext, setConfigLoader } = require('../../packages/flash-core');
+const { loadConfig: loadDesktopConfig, flushSaveConfig } = require('./core/config');
+setPathsContext({
+  tempDir: () => app.getPath('temp'),
+  userDataDir: () => app.getPath('userData'),
+  toolsDir: () => path.join(app.getPath('userData'), 'tools'),
+  appInstallRoot: () => (app.isPackaged ? path.dirname(app.getPath('exe')) : path.join(__dirname, '..', '..')),
+  isPackaged: () => !!app.isPackaged
+});
+setConfigLoader(() => loadDesktopConfig());
+
 const bus = require('./core/bus');
 const httpApi = require('./core/http-server');
 const updater = require('./core/updater');

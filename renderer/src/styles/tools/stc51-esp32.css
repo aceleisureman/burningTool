@@ -1,26 +1,34 @@
     /* ════ StcGal（STC 串口/USB BSL）════ */
     .stc-body { flex: 1; display: flex; min-height: 0; overflow: hidden; }
-    .stc-main { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 15px 18px 9px; gap: 12px; overflow: hidden; }
-    .stc-panel { flex-shrink: 0; }
+    .stc-main { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 10px 14px 6px; gap: 8px; overflow: hidden; }
+    .stc-panel { flex: 0 1 auto; min-height: 0; overflow-y: auto; }
+    .stc-main .log-panel { flex: 1; min-height: 110px; }
+
+    /* 紧凑化：压缩配置区，给日志更多空间 */
+    .stc-panel .ops-section { padding: 8px 14px; }
+    .stc-card .field { margin-bottom: 8px; }
+    .stc-card .field:last-child { margin-bottom: 0; }
+    .stc-card .set-hint { margin-top: 4px; font-size: 11px; line-height: 1.5; }
     .stc-hero {
-      display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
-      align-items: center; gap: 20px;
+      display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
+      align-items: center; gap: 16px;
       background: linear-gradient(135deg, var(--accent-soft), transparent 72%);
+      padding: 9px 14px;
     }
     .stc-hero > :first-child { min-width: 0; }
     .stc-hero .eyebrow {
       display: inline-flex; align-items: center; gap: 7px;
-      color: var(--accent); font-size: 10.5px; font-weight: 800;
+      color: var(--accent); font-size: 10px; font-weight: 800;
       letter-spacing: .16em; text-transform: uppercase;
     }
-    .stc-hero .eyebrow::before { content: ""; width: 16px; height: 2px; border-radius: 2px; background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
-    .stc-hero .title { margin-top: 5px; color: var(--text); font-size: 17px; font-weight: 800; letter-spacing: .2px; }
-    .stc-hero .hint { margin-top: 6px; color: var(--text-soft); font-size: 12.5px; line-height: 1.65; }
+    .stc-hero .eyebrow::before { content: ""; width: 14px; height: 2px; border-radius: 2px; background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
+    .stc-hero .title { margin-top: 3px; color: var(--text); font-size: 15px; font-weight: 800; letter-spacing: .2px; }
+    .stc-hero .hint { margin-top: 4px; color: var(--text-soft); font-size: 11.5px; line-height: 1.5; }
     .stc-tool-state {
-      width: 100%; min-width: 0; max-width: 360px; justify-self: end;
-      display: flex; flex-direction: column; gap: 8px; overflow: hidden;
+      width: 100%; min-width: 0; max-width: 340px; justify-self: end;
+      display: flex; flex-direction: column; gap: 5px; overflow: hidden;
       border: 1px solid rgba(225,29,72,.26); border-radius: 12px;
-      background: rgba(225,29,72,.06); padding: 12px 14px;
+      background: rgba(225,29,72,.06); padding: 9px 12px;
       transition: border-color .2s ease, background .2s ease;
     }
     .stc-tool-state.ok { border-color: var(--accent-line); background: var(--panel-2); }
@@ -44,12 +52,12 @@
     .stc-tool-state .sts-actions { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
     .el-icon.is-spin { animation: stc-spin 1s linear infinite; }
     @keyframes stc-spin { to { transform: rotate(360deg); } }
-    .stc-grid { display: grid; grid-template-columns: 1.05fr 1.05fr 1.4fr; gap: 12px; }
+    .stc-grid { display: grid; grid-template-columns: 1.05fr 1.05fr 1.4fr; gap: 10px; }
     .stc-card {
       min-width: 0; border: 1px solid var(--border); border-radius: 14px;
-      background: var(--panel-2); padding: 12px 13px; box-shadow: 0 1px 3px rgba(0,0,0,.04);
+      background: var(--panel-2); padding: 10px 12px; box-shadow: 0 1px 3px rgba(0,0,0,.04);
     }
-    .stc-card-h { display: flex; align-items: center; gap: 8px; color: var(--text); font-size: 13px; font-weight: 750; padding-bottom: 10px; margin-bottom: 10px; border-bottom: 1px solid var(--border); }
+    .stc-card-h { display: flex; align-items: center; gap: 8px; color: var(--text); font-size: 12.5px; font-weight: 750; padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px solid var(--border); }
     .stc-card-h .el-icon { color: var(--accent); }
     .stc-inline { display: flex; gap: 8px; align-items: center; }
     .stc-file-card { display: flex; flex-direction: column; }
@@ -65,22 +73,75 @@
     .stc-checks { display: flex; flex-direction: column; gap: 8px; min-height: 58px; justify-content: center; }
     .stc-actions { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 
-    .stc-steps { display: flex; gap: 10px; flex-wrap: wrap; }
+    .stc-steps { display: flex; gap: 8px; flex-wrap: wrap; }
     .stc-steps div {
-      display: inline-flex; align-items: center; gap: 8px; min-height: 36px;
+      display: inline-flex; align-items: center; gap: 7px; min-height: 30px;
       border: 1px solid var(--border); background: var(--panel-2); border-radius: 999px;
-      padding: 5px 11px 5px 6px; color: var(--text-soft); font-size: 12px; font-weight: 600;
+      padding: 4px 10px 4px 5px; color: var(--text-soft); font-size: 11.5px; font-weight: 600;
     }
     .stc-steps b {
-      width: 24px; height: 24px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
-      background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff; font-family: var(--mono); font-size: 12px;
+      width: 20px; height: 20px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff; font-family: var(--mono); font-size: 11px;
     }
-    .stc-actions .one-shot { min-width: 150px; height: 44px; }
+    .stc-actions .one-shot { min-width: 140px; height: 40px; }
     @media (max-width: 1180px) {
       .stc-hero { grid-template-columns: 1fr; align-items: stretch; }
       .stc-actions { flex-direction: column; align-items: stretch; }
       .stc-tool-state { min-width: 0; max-width: none; justify-self: stretch; }
       .stc-grid, .stc-advanced { grid-template-columns: 1fr; }
       .stc-file-pick { align-items: stretch; flex-direction: column; }
+      .esp-single-pick { flex-direction: column; align-items: stretch; }
+      .esp-offset { flex-basis: auto; }
     }
 
+
+
+/* ESP32 专属布局 */
+.stc-grid-esp { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+.esp-single-pick { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.esp-single-pick .stc-file-pick { flex: 1; min-width: 0; }
+.esp-offset { flex: 0 0 210px; }
+
+.esp-parts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.esp-parts-grid .esp-part-row { margin-bottom: 0; }
+
+/* ESP 多 bin 分区 / 方案 */
+.esp-preset-bar,
+.esp-template-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.esp-template-bar { margin-top: -2px; }
+.esp-part-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel-2);
+}
+.esp-part-row.off {
+  opacity: .55;
+  background: transparent;
+}
+.esp-part-row .esp-part-file {
+  flex: 1;
+  min-width: 0;
+  justify-content: flex-start;
+}
+.esp-part-row .esp-part-file span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

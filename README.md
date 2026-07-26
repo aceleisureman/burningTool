@@ -9,7 +9,7 @@
 
 MCU工具箱是一个基于 **Electron + Vue 3 + Vite** 的桌面应用，把嵌入式开发常用的零散命令行工具整合成统一可视化界面。开箱即用，自动按平台下载工具链，无需手动配置环境。
 
-### 内置 9 大工具
+### 内置 10 大工具
 
 | 工具 | 功能 | 后端 |
 |------|------|------|
@@ -22,6 +22,7 @@ MCU工具箱是一个基于 **Electron + Vue 3 + Vite** 的桌面应用，把嵌
 | ↔️ **串口调试** | 收发 / HEX / 快捷指令 / 循环发送 | serialport |
 | 💬 **MQTT 调试** | 多连接 · 订阅/发布 · JSON 高亮 | mqtt.js |
 | 🅰 **字模生成** | 点阵字模（PCtoLCD2002 风格） | Canvas 光栅化 |
+| 🧮 **校验工具** | Checksum / CRC8 / CRC16 / CRC32 | 前端算法 |
 
 ---
 
@@ -97,26 +98,16 @@ npm run check     # 测试 + lint + 渲染层生产构建
 
 ```text
 burningTool/
+├── packages/
+│   └── flash-core/                 # 共享编译烧录核心（无 Electron，桌面端与 VS Code 扩展共用）
+├── plugins/
+│   └── vscode-stm32-flash/         # VS Code 扩展：STM32 编译烧录
 ├── src/main/                       # Electron 主进程（CommonJS）
-│   ├── index.js                    # 生命周期、日志 sink、模块装配
+│   ├── index.js                    # 生命周期、路径注入、日志 sink、IPC 装配
 │   ├── ipc/                        # 按领域注册 IPC
-│   │   ├── register-core-ipc.js
-│   │   ├── register-toolchain-ipc.js
-│   │   ├── register-project-ipc.js
-│   │   ├── register-flash-ipc.js
-│   │   └── register-debug-ipc.js
-│   ├── toolchain/                  # 工具链领域
-│   │   ├── toolchain.js            # 兼容入口/统一导出
-│   │   ├── paths.js                # 路径与可执行文件解析
-│   │   ├── status.js               # 状态、版本、构建环境
-│   │   ├── installer.js            # 下载与安装
-│   │   └── system-path.js          # 系统 PATH 管理
-│   ├── flash/                      # 编译烧录领域
-│   │   ├── flasher.js              # 兼容入口/统一导出
-│   │   ├── probe.js                # 探针、芯片识别、硬件调试
-│   │   ├── project.js              # 工程识别与固件定位
-│   │   ├── build.js                # Makefile/Keil 编译
-│   │   └── runner.js               # pyOCD/OpenOCD/Keil 烧录
+│   ├── core/                       # 配置、窗口相关桌面核心
+│   ├── toolchain/                  # 兼容 re-export → packages/flash-core
+│   ├── flash/                      # STM32 兼容 re-export；stc51/esp32 仍在此
 │   ├── devices/                    # 串口、MQTT
 │   ├── firmware/                   # 固件分析
 │   └── ramlog/                     # 内存日志
@@ -125,15 +116,29 @@ burningTool/
 │   ├── App.vue                     # 根布局、页面状态装配
 │   ├── views/                      # 每个工具一个页面组件
 │   ├── composables/                # 每个领域一个状态/业务组合函数
+│   ├── components/                 # 跨工具通用组件
 │   └── styles/                     # base、layout 与 tools/* 页面样式
 ├── tests/                          # node:test
-├── docs/                           # 架构与结构优化说明
+├── docs/
+│   ├── README.md                   # 文档索引
+│   └── architecture.md             # 架构与目录职责
 ├── assets/icons/                   # 应用图标
-├── scripts/                        # 开发/停止脚本
-└── package.json
+├── scripts/                        # 开发/停止/扩展同步打包脚本
+├── package.json
+├── vite.config.mjs
+└── eslint.config.mjs
 ```
 
-> `toolchain/`、`tools/`、`node_modules/`、`dist/`、`renderer/dist/` 均为本地依赖或生成物，不入版本库。默认工具链在运行时按平台下载；打包配置明确排除 `resources/`，仓库不再维护重复工具链副本。
+> 详细职责说明见 [docs/architecture.md](docs/architecture.md)。  
+> `toolchain/`、`tools/`、`node_modules/`、`dist/`、`renderer/dist/`、`*.vsix`、`plugins/**/vendor/` 均为本地依赖或生成物，不入版本库。默认工具链在运行时按平台下载；打包配置明确排除 `resources/`，仓库不再维护重复工具链副本。
+
+### VS Code 扩展
+
+```bash
+npm run ext:sync      # packages/flash-core → plugins/.../vendor
+npm run ext:package   # 同步 + 自动递增版本号 + 生成 .vsix
+# npm run ext:package -- --minor|--major|--no-bump
+```
 
 ---
 
