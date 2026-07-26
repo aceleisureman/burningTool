@@ -136,3 +136,149 @@ export function now() {
   const p = (n) => String(n).padStart(2, '0');
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
+
+
+
+/* ── CRC / 校验工具 ─────────────────────────────────────────────── */
+function ensureBytes(input) {
+  if (input instanceof Uint8Array) return input;
+  if (ArrayBuffer.isView(input)) return new Uint8Array(input.buffer, input.byteOffset, input.byteLength);
+  if (input instanceof ArrayBuffer) return new Uint8Array(input);
+  return hexToBytes(String(input || ''));
+}
+
+function reflectBits(value, width) {
+  let x = value >>> 0;
+  let y = 0;
+  for (let i = 0; i < width; i++) {
+    y = (y << 1) | (x & 1);
+    x >>>= 1;
+  }
+  return y >>> 0;
+}
+
+function makeTable(width, poly, refin) {
+  const mask = width === 32 ? 0xFFFFFFFF : ((1 << width) - 1);
+  const top = width === 32 ? 0x80000000 : (1 << (width - 1));
+  const tablePoly = refin ? reflectBits(poly, width) : (poly >>> 0);
+  const table = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) {
+    let c = refin ? i : ((i << (width - 8)) >>> 0);
+    for (let k = 0; k < 8; k++) {
+      if (refin) {
+        c = (c & 1) ? ((c >>> 1) ^ tablePoly) : (c >>> 1);
+      } else {
+        c = (c & top) ? ((((c << 1) >>> 0) ^ tablePoly) >>> 0) : ((c << 1) >>> 0);
+      }
+      c &= mask;
+    }
+    table[i] = c >>> 0;
+  }
+  return table;
+}
+
+const CRC_ALGO_DEFS = {
+  checksum8: { label: 'Checksum-8', width: 8, kind: 'sum' },
+  xor8: { label: 'XOR-8', width: 8, kind: 'xor' },
+  crc8: { label: 'CRC-8', width: 8, poly: 0x07, init: 0x00, refin: false, refout: false, xorout: 0x00 },
+  crc8_maxim: { label: 'CRC-8/MAXIM', width: 8, poly: 0x31, init: 0x00, refin: true, refout: true, xorout: 0x00 },
+  crc16_modbus: { label: 'CRC-16/MODBUS', width: 16, poly: 0x8005, init: 0xFFFF, refin: true, refout: true, xorout: 0x0000 },
+  crc16_ccitt: { label: 'CRC-16/CCITT-FALSE', width: 16, poly: 0x1021, init: 0xFFFF, refin: false, refout: false, xorout: 0x0000 },
+  crc16_xmodem: { label: 'CRC-16/XMODEM', width: 16, poly: 0x1021, init: 0x0000, refin: false, refout: false, xorout: 0x0000 },
+  crc16_ibm: { label: 'CRC-16/IBM', width: 16, poly: 0x8005, init: 0x0000, refin: true, refout: true, xorout: 0x0000 },
+  crc32: { label: 'CRC-32', width: 32, poly: 0x04C11DB7, init: 0xFFFFFFFF, refin: true, refout: true, xorout: 0xFFFFFFFF },
+  crc32c: { label: 'CRC-32C', width: 32, poly: 0x1EDC6F41, init: 0xFFFFFFFF, refin: true, refout: true, xorout: 0xFFFFFFFF },
+};
+
+const CRC_TABLE_CACHE = new Map();
+
+function getCrcTable(algo) {
+  const key = `${algo.width}:${algo.poly}:${algo.refin ? 1 : 0}`;
+  if (!CRC_TABLE_CACHE.has(key)) CRC_TABLE_CACHE.set(key, makeTable(algo.width, algo.poly, !!algo.refin));
+  return CRC_TABLE_CACHE.get(key);
+}
+
+export function listCrcAlgorithms() {
+  return Object.entries(CRC_ALGO_DEFS).map(([id, def]) => ({
+    id,
+    label: def.label,
+    width: def.width,
+    kind: def.kind || 'crc',
+  }));
+}
+
+export function calcCrc(algoId, input, options = {}) {
+  const algo = CRC_ALGO_DEFS[algoId];
+  if (!algo) throw new Error('未知校验算法: ' + algoId);
+  const bytes = ensureBytes(input);
+  const mask = algo.width === 32 ? 0xFFFFFFFF : ((1 << algo.width) - 1);
+  let value = 0;
+
+  if (algo.kind === 'sum') {
+    for (const b of bytes) value = (value + b) & 0xFF;
+  } else if (algo.kind === 'xor') {
+    for (const b of bytes) value ^= b;
+    value &= 0xFF;
+  } else {
+    const table = getCrcTable(algo);
+    value = (algo.init >>> 0) & mask;
+    if (algo.refin) {
+      for (const b of bytes) value = (table[(value ^ b) & 0xFF] ^ (value >>> 8)) & mask;
+    } else {
+      const shift = algo.width - 8;
+      for (const b of bytes) {
+        value = (table[((value >>> shift) ^ b) & 0xFF] ^ ((value << 8) & mask)) & mask;
+      }
+    }
+    if (!!algo.refout !== !!algo.refin) value = reflectBits(value, algo.width) & mask;
+    value = ((value ^ (algo.xorout >>> 0)) & mask) >>> 0;
+  }
+
+  if (options.invert) value = (~value) & mask;
+  value = value >>> 0;
+  const width = algo.width;
+  const hex = value.toString(16).toUpperCase().padStart(width / 4, '0');
+
+  // 反射算法（如 Modbus）通常按小端附加；非反射算法按大端附加
+  const littleEndian = !!(algo.refin || algo.refout);
+  const bytesOut = [];
+  for (let i = 0; i < width; i += 8) {
+    const shift = littleEndian ? i : (width - 8 - i);
+    bytesOut.push((value >>> shift) & 0xFF);
+  }
+
+  return {
+    algo: algoId,
+    label: algo.label,
+    width,
+    value,
+    hex,
+    hexPrefixed: '0x' + hex,
+    littleEndian,
+    bytes: bytesOut,
+    bytesHex: bytesOut.map((b) => b.toString(16).toUpperCase().padStart(2, '0')).join(' '),
+    length: bytes.length,
+  };
+}
+
+export function parseCrcInput(text, mode = 'hex') {
+  const raw = String(text ?? '');
+  if (!raw.trim()) return new Uint8Array();
+  if (mode === 'ascii') {
+    if (typeof TextEncoder !== 'undefined') return new TextEncoder().encode(raw);
+    const out = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i) & 0xFF;
+    return out;
+  }
+  if (mode === 'dec') {
+    const parts = raw.trim().split(/[\s,;]+/).filter(Boolean);
+    const out = new Uint8Array(parts.length);
+    for (let i = 0; i < parts.length; i++) {
+      const n = Number(parts[i]);
+      if (!Number.isInteger(n) || n < 0 || n > 255) throw new Error('十进制输入需为 0~255 的整数');
+      out[i] = n;
+    }
+    return out;
+  }
+  return hexToBytes(raw);
+}

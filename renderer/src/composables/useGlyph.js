@@ -56,7 +56,7 @@ export function useGlyph() {
   }
   function drawGlyphPreviews() {
     const size = gl.size;
-    const scale = Math.max(3, Math.floor(176 / size));
+    const scale = Math.max(3, Math.floor(224 / size));
     document.querySelectorAll('canvas.gl-canvas').forEach((cv) => {
       const gi = Number(cv.getAttribute('data-gi'));
       const g = gl.glyphs[gi];

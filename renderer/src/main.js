@@ -19,6 +19,7 @@ import './styles/tools/hardware.css';
 import './styles/tools/ramlog.css';
 import './styles/tools/firmware.css';
 import './styles/tools/glyph.css';
+import './styles/tools/crc.css';
 import './styles/tools/stc51-esp32.css';
 import './styles/tools/settings.css';
 

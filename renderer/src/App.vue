@@ -48,6 +48,9 @@
       <button class="nav-item" :class="{ active: tool === 'glyph' }" @click="tool = 'glyph'" title="字模生成">
         <el-icon><Grid /></el-icon><span class="label">字模生成</span>
       </button>
+      <button class="nav-item" :class="{ active: tool === 'crc' }" @click="tool = 'crc'" title="CRC 校验工具">
+        <el-icon><DataLine /></el-icon><span class="label">CRC校验</span>
+      </button>
 
       <div class="nav-spacer"></div>
       <div class="nav-foot">
@@ -152,7 +155,7 @@
             <span v-else-if="updateState.status === 'checking'">正在检查更新…</span>
           </div>
         </div>
-        <div class="about-desc">可视化编译烧录 · StcGal · 串口调试 · MQTT 调试 · 字模生成</div>
+        <div class="about-desc">可视化编译烧录 · StcGal · 串口调试 · MQTT 调试 · 字模生成 · CRC 校验</div>
         <div class="about-divider"></div>
         <div class="about-org">锐新网络科技有限公司</div>
         <div class="about-sub">© 2026 RuiXin Network Technology · 版权所有</div>
@@ -197,6 +200,7 @@
       <!-- ───── 工具④：字模生成（PCtoLCD 风格 · 重编）───── -->
       <!-- glyph -->
       <GlyphView v-show="tool === 'glyph'" />
+      <CrcView v-show="tool === 'crc'" />
 
       <!-- ───── 工具⑤：设置 ───── -->
       <!-- settings -->
@@ -261,6 +265,7 @@ import {
 import { useTheme } from './composables/useTheme.js';
 import { useLog } from './composables/useLog.js';
 import { useGlyph } from './composables/useGlyph.js';
+import { useCrc } from './composables/useCrc.js';
 import { useSerial } from './composables/useSerial.js';
 import { useMqtt } from './composables/useMqtt.js';
 import { useSettings } from './composables/useSettings.js';
@@ -281,10 +286,11 @@ import FirmwareView from './views/FirmwareView.vue';
 import SerialView from './views/SerialView.vue';
 import MqttView from './views/MqttView.vue';
 import GlyphView from './views/GlyphView.vue';
+import CrcView from './views/CrcView.vue';
 import SettingsView from './views/SettingsView.vue';
 
 export default {
-  components: { FlashView, Stc51View, Esp32View, HardwareView, RamLogView, FirmwareView, SerialView, MqttView, GlyphView, SettingsView },
+  components: { FlashView, Stc51View, Esp32View, HardwareView, RamLogView, FirmwareView, SerialView, MqttView, GlyphView, CrcView, SettingsView },
   setup() {
     /* ════ 应用外壳：工具切换 / 侧边栏 / 关于 ════ */
     const tool = ref('flash');
@@ -299,6 +305,7 @@ export default {
     const theme = useTheme();
     const log = useLog();
     const glyph = useGlyph();
+    const crcTool = useCrc();
     const serial = useSerial();
     const mqtt = useMqtt();
     const settings = useSettings({ appendLog: log.appendLog, appShell, serial, mqtt });
@@ -327,7 +334,7 @@ export default {
 
     const appContext = {
       tool, navCollapsed, toggleNav, aboutVisible, appVersion,
-      ...theme, ...log, ...glyph, ...settings, ...flash, ...stc51Tool, ...esp32Tool, ...hardware, ...ramlog, ...firmware, ...serial, ...mqtt, ...update,
+      ...theme, ...log, ...glyph, ...crcTool, ...settings, ...flash, ...stc51Tool, ...esp32Tool, ...hardware, ...ramlog, ...firmware, ...serial, ...mqtt, ...update,
       FolderOpened, VideoPlay, Upload, CaretRight, Delete, Download, MagicStick, CopyDocument,
       Connection, SwitchButton, Promotion, Plus, Close, RefreshRight, VideoPause, Cpu,
       Operation, Document, DataAnalysis, DataLine
