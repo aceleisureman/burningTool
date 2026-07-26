@@ -33,11 +33,16 @@ function appInstallRoot() {
 }
 
 function preferredToolchainRoot(cfg) {
-  // 优先使用用户指定的保存目录；留空则：打包态 userData/toolchain，开发态仓库根 toolchain/
+  // 优先使用调用方传入的 cfg.toolchainRootPath；
+  // 未传 cfg 时再 loadConfig；都空则：paths-context.toolchainRoot → packaged userData/toolchain → 仓库 toolchain/
   let custom = '';
   try {
-    const c = cfg || loadConfig() || {};
-    custom = expandHomePath(String(c.toolchainRootPath || '').trim());
+    if (cfg && typeof cfg === 'object') {
+      custom = expandHomePath(String(cfg.toolchainRootPath || '').trim());
+    } else {
+      const c = loadConfig() || {};
+      custom = expandHomePath(String(c.toolchainRootPath || '').trim());
+    }
   } catch {}
   if (custom) return path.resolve(custom);
   const ctx = getPathsContext();

@@ -2,22 +2,22 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const os = require('node:os');
 const path = require('node:path');
-const Module = require('node:module');
+
+// flash-core 通过 paths-context 注入路径，不再直接依赖 electron.app。
+// 测试里注入与「打包态 + 临时 userData」等价的上下文。
+const { setPathsContext } = require('../packages/flash-core');
 
 const tmpUserData = path.join(os.tmpdir(), 'burningtool-toolchain-test');
 const tmpExeDir = path.join(os.tmpdir(), 'burningtool-app-root');
-const origLoad = Module._load;
-Module._load = function (request, parent, isMain) {
-  if (request === 'electron') {
-    return {
-      app: {
-        isPackaged: true,
-        getPath: (name) => (name === 'exe' ? path.join(tmpExeDir, 'MCU工具箱.exe') : tmpUserData)
-      }
-    };
-  }
-  return origLoad.apply(this, arguments);
-};
+
+setPathsContext({
+  tempDir: os.tmpdir(),
+  userDataDir: tmpUserData,
+  toolsDir: path.join(tmpUserData, 'tools'),
+  appInstallRoot: tmpExeDir,
+  isPackaged: true
+  // 不设 toolchainRoot：让 preferredToolchainRoot 走 packaged → userData/toolchain
+});
 
 const {
   APPLETS, parseToolVersion, supportedCommandTools, toolchainRoot, preferredToolchainRoot,
@@ -114,8 +114,4 @@ test('preferredToolchainRoot honors custom toolchainRootPath', () => {
   const custom = path.join(tmpUserData, 'my-toolchain-store');
   assert.equal(preferredToolchainRoot({ toolchainRootPath: custom }), path.resolve(custom));
   assert.equal(preferredToolchainRoot({ toolchainRootPath: '' }), path.join(tmpUserData, 'toolchain'));
-});
-
-test.after(() => {
-  Module._load = origLoad;
 });
