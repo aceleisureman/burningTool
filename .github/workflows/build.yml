@@ -43,10 +43,16 @@ jobs:
         run: npm version "1.0.${{ github.run_number }}" --no-git-tag-version
 
       # electron-builder 直接发布到 GitHub Release（tag v1.0.<构建号>），
-      # 同时上传 latest.yml / latest-mac.yml / latest-linux.yml 供应用内自动更新
+      # 同时上传 latest.yml / latest-mac.yml / latest-linux.yml 供应用内自动更新。
+      # macOS：必须产出 zip（dmg 仅给人手工安装）；当前无 Apple 开发者证书，
+      # 关闭签名发现并显式 CSC_IDENTITY_AUTO_DISCOVERY=false，与 package.json mac.identity=null 一致。
+      # 应用侧 updater 已关闭 verifyUpdateCodeSignature，使未签名包也能完成 ShipIt 替换。
       - name: Build & publish
         shell: bash
         run: npx vite build && npx electron-builder ${{ matrix.args }} --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: false
+          # 避免 macOS 构建在无证书环境误走签名/公证流程
+          CSC_LINK: ''
+          CSC_KEY_PASSWORD: ''

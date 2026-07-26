@@ -145,10 +145,11 @@
           </el-button>
           <div class="about-update-tip">
             <span v-if="updateState.status === 'latest'">已是最新版本</span>
-            <span v-else-if="updateState.status === 'downloading'">正在下载新版本 v{{ updateState.version }}…</span>
+            <span v-else-if="updateState.status === 'downloading'">正在下载新版本 v{{ updateState.version }}… {{ updateState.percent }}%</span>
             <span v-else-if="updateState.status === 'downloaded'">新版本已就绪，点击重启完成更新</span>
             <span v-else-if="updateState.status === 'installing'">正在关闭占用资源并安装更新…</span>
             <span v-else-if="updateState.status === 'error'" class="about-update-err">{{ updateState.error }}</span>
+            <span v-else-if="updateState.status === 'checking'">正在检查更新…</span>
           </div>
         </div>
         <div class="about-desc">可视化编译烧录 · StcGal · 串口调试 · MQTT 调试 · 字模生成</div>

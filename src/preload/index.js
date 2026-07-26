@@ -64,5 +64,10 @@ contextBridge.exposeInMainWorld('api', {
   updateCheck:      () => ipcRenderer.invoke('update-check'),    // 手动检查更新
   updateStatus:     () => ipcRenderer.invoke('update-status'),   // 当前更新状态/进度
   updateInstall:    () => ipcRenderer.invoke('update-install'),  // 重启并安装已下载的更新
+  onUpdateStatus:   (cb) => {                                   // 主进程主动推送状态（下载进度/完成）
+    const handler = (_e, s) => cb(s);
+    ipcRenderer.on('update-status', handler);
+    return () => ipcRenderer.removeListener('update-status', handler);
+  },
   copyToClipboard:  (text) => ipcRenderer.invoke('clipboard-write', text)  // 收到消息
 });

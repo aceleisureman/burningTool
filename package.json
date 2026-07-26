@@ -77,10 +77,25 @@
     },
     "mac": {
       "icon": "assets/icons/icon.icns",
+      "artifactName": "stm32-flasher-${version}-${arch}.${ext}",
+      "category": "public.app-category.developer-tools",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "identity": null,
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "dmg": {
       "artifactName": "stm32-flasher-${version}-${arch}.${ext}"
     },
     "linux": {
-      "icon": "assets/icons"
+      "icon": "assets/icons",
+      "target": [
+        "AppImage"
+      ],
+      "artifactName": "stm32-flasher-${version}-${arch}.${ext}"
     }
   },
   "devDependencies": {

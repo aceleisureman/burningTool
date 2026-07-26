@@ -1,5 +1,5 @@
 // 应用内自动更新（对接主进程 updater.js / GitHub Releases）
-import { ref, reactive } from 'vue';
+import { ref, reactive, onUnmounted } from 'vue';
 
 export function useUpdate() {
   const updateState = reactive({
@@ -7,11 +7,13 @@ export function useUpdate() {
     currentVersion: '',  // 当前运行版本
     version: null,       // 可更新到的版本
     percent: 0,
-    error: null
+    error: null,
+    platform: ''
   });
   const updateChecking = ref(false);
   const updateInstalling = ref(false);
   let pollTimer = null;
+  let offStatus = null;
 
   function applyState(s) {
     if (!s) return;
@@ -19,7 +21,7 @@ export function useUpdate() {
     if (s.status === 'installing') updateInstalling.value = true;
   }
 
-  // 轮询主进程状态，直到下载完成/最新/出错/安装中
+  // 兜底轮询：主进程推送失败时仍能看到进度（例如旧版本 preload）
   function startPoll() {
     stopPoll();
     pollTimer = setInterval(async () => {
@@ -48,6 +50,7 @@ export function useUpdate() {
         updateState.error = r.error || '检查失败';
       } else {
         if (r && r.state) applyState(r.state);
+        // 推送通道已接好时轮询仅作短时兜底
         startPoll();
       }
     } catch (e) {
@@ -80,10 +83,34 @@ export function useUpdate() {
     }
   }
 
-  // 初始化时拉一次当前版本/状态
+  // 初始化时拉一次当前版本/状态，并订阅主进程推送
   async function initUpdate() {
+    try {
+      if (typeof window.api.onUpdateStatus === 'function') {
+        offStatus = window.api.onUpdateStatus((s) => applyState(s));
+      }
+    } catch (e) {}
     try { applyState(await window.api.updateStatus()); } catch (e) {}
   }
 
-  return { updateState, updateChecking, updateInstalling, checkUpdate, installUpdate, initUpdate };
+  function disposeUpdate() {
+    stopPoll();
+    if (typeof offStatus === 'function') {
+      try { offStatus(); } catch (e) {}
+      offStatus = null;
+    }
+  }
+
+  // 组件卸载时清理（App.vue 根组件一般不卸载，但保留安全路径）
+  try { onUnmounted(disposeUpdate); } catch (e) {}
+
+  return {
+    updateState,
+    updateChecking,
+    updateInstalling,
+    checkUpdate,
+    installUpdate,
+    initUpdate,
+    disposeUpdate
+  };
 }

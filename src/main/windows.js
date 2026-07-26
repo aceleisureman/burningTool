@@ -42,6 +42,16 @@ function quitApp() {
   app.quit();
 }
 
+// 更新安装前：标记退出、销毁托盘，避免 close 被拦截成 hide，以及 macOS 托盘拖住进程
+function prepareForQuit() {
+  app.isQuitting = true;
+  if (tray && !tray.isDestroyed()) {
+    try { tray.destroy(); } catch {}
+    tray = null;
+  }
+  return true;
+}
+
 // 系统托盘：图标 + 右键菜单（显示主窗口 / 退出）
 function createTray() {
   if (tray && !tray.isDestroyed()) return;
@@ -192,4 +202,4 @@ function focusOrCreate() {
   }
 }
 
-module.exports = { createWindow, getMainWindow, focusOrCreate, APP_ICON };
+module.exports = { createWindow, getMainWindow, focusOrCreate, prepareForQuit, APP_ICON };
