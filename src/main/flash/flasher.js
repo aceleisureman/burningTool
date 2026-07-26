@@ -352,7 +352,15 @@ function makeTargetOverrideArgs(projectDir) {
 // keilProj 可选：调用方已执行过 findKeilProject 时传入其结果（含 null），避免同一目录树被重复 BFS 扫描
 function detectBuildSystem(projectDir, cfg, keilProj) {
   const mode = (cfg && cfg.buildSystem) || 'auto';
-  if (mode === 'make') return 'make';
+  if (mode === 'make') {
+    // 设置固定为 make 但目录无 Makefile 且识别到 Keil 工程时，自动切换到 Keil 编译
+    if (KEIL_SUPPORTED && !fs.existsSync(path.join(projectDir, 'Makefile'))
+        && (keilProj !== undefined ? keilProj : findKeilProject(projectDir))) {
+      bus.send('[编译] 未找到 Makefile，但识别到 Keil 工程，自动切换为 Keil 编译方式', 'info');
+      return 'keil';
+    }
+    return 'make';
+  }
   if (mode === 'keil') return KEIL_SUPPORTED ? 'keil' : 'make';
   // auto：Keil 工程优先；否则有 Makefile 走 make；都没有默认 make
   if (KEIL_SUPPORTED && (keilProj !== undefined ? keilProj : findKeilProject(projectDir))) return 'keil';
@@ -533,13 +541,37 @@ async function runUV4(cfg, projectDir, op /* 'build' | 'flash' */) {
   const cmdFlag = op === 'flash' ? '-f' : (cfg.keilRebuild ? '-z' : '-b');
   const args = [cmdFlag, proj, '-j0', '-o', logFile];
   bus.send(`[${op === 'flash' ? '烧录' : '编译'}] UV4 ${cmdFlag} "${path.basename(proj)}" ...`, 'step');
+  // UV4 只把输出写进 -o 日志文件，编译期间轮询该文件、把新增的完整行实时推送到前端
+  let sentLines = 0;
+  const pumpLog = (final) => {
+    let txt = '';
+    try { txt = fs.readFileSync(logFile, 'utf8'); } catch { return ''; }
+    const lines = txt.split(/\r?\n/);
+    // 非最终读取时最后一行可能尚未写完，留到下一轮
+    const upto = final ? lines.length : lines.length - 1;
+    for (; sentLines < upto; sentLines++) {
+      const ln = lines[sentLines];
+      if (ln.trim()) bus.send(ln.trimEnd());
+    }
+    return txt;
+  };
+  const timer = setInterval(pumpLog, 500);
   // Keil 工程可能在子目录，cwd 用工程文件所在目录，以保证工程内相对路径正确
-  const code = await runProcess(uv4, args, { cwd: path.dirname(proj), shell: false });
-  let log = '';
-  try { log = fs.readFileSync(logFile, 'utf8'); } catch {}
-  if (log.trim()) {
-    log.split(/\r?\n/).forEach((ln) => { if (ln.trim()) bus.send(ln.trimEnd()); });
+  let code;
+  try {
+    // UV4 是 GUI 程序，忽略 windowsHide；用 PowerShell Start-Process -WindowStyle Hidden
+    // 在后台隐藏窗口运行，-Wait 等待结束并透传退出码（输出仍走 -o 日志文件轮询）
+    const psq = (s) => `'${String(s).replace(/'/g, "''")}'`;
+    // Start-Process 拼接 ArgumentList 时不会自动加引号，含空格的路径参数需自带双引号
+    const psArg = (s) => psq(/\s/.test(String(s)) ? `"${s}"` : s);
+    const psCmd = `$p = Start-Process -FilePath ${psq(uv4)} -ArgumentList @(${args.map(psArg).join(', ')}) `
+      + `-WorkingDirectory ${psq(path.dirname(proj))} -WindowStyle Hidden -Wait -PassThru; exit $p.ExitCode`;
+    code = await runProcess('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', psCmd],
+      { cwd: path.dirname(proj), shell: false, windowsHide: true });
+  } finally {
+    clearInterval(timer);
   }
+  const log = pumpLog(true);
   try { fs.unlinkSync(logFile); } catch {}
   return { code, log };
 }

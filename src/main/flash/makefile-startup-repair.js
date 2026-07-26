@@ -127,7 +127,7 @@ function findFile(root, filename, prefer, maxDepth = 12) {
 function ensureMakefileStartupSources(projectDir, options = {}) {
   const makefile = path.join(projectDir, 'Makefile');
   let txt;
-  try { txt = fs.readFileSync(makefile, 'utf8'); } catch { return { created: [], missing: [] }; }
+  try { txt = fs.readFileSync(makefile, 'utf8'); } catch { return { created: [], missing: [], failed: [] }; }
 
   const startupSources = parseMakefileAsmSources(txt)
     .filter((src) => /^startup_.*\.s$/i.test(path.basename(src)));

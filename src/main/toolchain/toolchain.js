@@ -72,11 +72,17 @@ function isToolchainInstalled() {
 }
 
 /* ── 工具链路径解析（custom / default 两种模式）─────────── */
-function toolchainRoot() {
+// 软件根目录：开发态=仓库根；打包态=可执行文件所在目录（安装/便携根目录）
+function appInstallRoot() {
   if (app.isPackaged || String(__dirname).includes('app.asar')) {
-    return path.join(app.getPath('userData'), 'toolchain');
+    return path.dirname(app.getPath('exe'));
   }
-  return path.join(__dirname, '..', '..', '..', 'toolchain');
+  return path.join(__dirname, '..', '..', '..');
+}
+
+function toolchainRoot() {
+  // 默认自动下载始终落在软件根目录 toolchain/，便于随软件一起查看/备份
+  return path.join(appInstallRoot(), 'toolchain');
 }
 
 function localPyocdRoot() {
@@ -270,10 +276,129 @@ function firstVersion(text) {
 
 function buildEnv(cfg) {
   const eff = effectivePaths(cfg);
-  const extra = [...toolsSearchDirs(), eff.armGccPath, eff.makePath].filter(Boolean).join(PLATFORM_TC.pathDelimiter);
+  const pyDir = eff.pyocdPath ? path.dirname(eff.pyocdPath) : '';
+  const ocdDir = eff.openocdPath ? path.dirname(eff.openocdPath) : '';
+  const extra = [...toolsSearchDirs(), eff.armGccPath, eff.makePath, pyDir, ocdDir].filter(Boolean).join(PLATFORM_TC.pathDelimiter);
   return Object.assign({}, process.env, {
     PATH: extra ? `${extra}${PLATFORM_TC.pathDelimiter}${process.env.PATH}` : process.env.PATH
   });
+}
+
+function pathEntryKey(p) {
+  const n = path.resolve(String(p || ''));
+  return process.platform === 'win32' ? n.toLowerCase() : n;
+}
+
+function uniqueExistingDirs(dirs) {
+  const out = [];
+  const seen = new Set();
+  for (const d of dirs || []) {
+    if (!d || typeof d !== 'string') continue;
+    const abs = path.resolve(d);
+    if (!fs.existsSync(abs)) continue;
+    try { if (!fs.statSync(abs).isDirectory()) continue; } catch { continue; }
+    const key = pathEntryKey(abs);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(abs);
+  }
+  return out;
+}
+
+function collectToolchainPathDirs(status) {
+  const st = status || defaultToolchainStatus();
+  const dirs = [];
+  if (st.gccBin) dirs.push(st.gccBin);
+  if (st.makeBin && st.makeBin !== 'system') dirs.push(st.makeBin);
+  if (st.openocdBin) dirs.push(path.dirname(st.openocdBin));
+  if (st.pyocdBin) dirs.push(path.dirname(st.pyocdBin));
+  for (const d of toolsSearchDirs()) dirs.push(d);
+  for (const rootFn of [localStcgalRoot, localEsptoolRoot]) {
+    try {
+      const root = rootFn();
+      dirs.push(process.platform === 'win32' ? path.join(root, 'Scripts') : path.join(root, 'bin'));
+    } catch {}
+  }
+  return uniqueExistingDirs(dirs);
+}
+
+function readWindowsUserPath() {
+  const r = spawnSync('powershell', [
+    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
+    "[Environment]::GetEnvironmentVariable('Path','User')"
+  ], { encoding: 'utf8', timeout: 8000, windowsHide: true });
+  if (r.error || r.status !== 0) {
+    const msg = r.error ? r.error.message : String(r.stderr || '').trim();
+    throw new Error(msg || 'read user PATH failed');
+  }
+  return String(r.stdout || '').replace(/\r?\n/g, '');
+}
+
+function writeWindowsUserPath(newPath) {
+  const r = spawnSync('powershell', [
+    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
+    "[Environment]::SetEnvironmentVariable('Path', $env:BT_NEW_PATH, 'User')"
+  ], {
+    encoding: 'utf8',
+    timeout: 8000,
+    windowsHide: true,
+    env: Object.assign({}, process.env, { BT_NEW_PATH: newPath })
+  });
+  if (r.error || r.status !== 0) {
+    const msg = r.error ? r.error.message : String(r.stderr || '').trim();
+    throw new Error(msg || 'write user PATH failed');
+  }
+}
+
+function mergePathEntries(existingPath, dirsToAdd, delimiter) {
+  const parts = String(existingPath || '').split(delimiter).map((x) => x.trim()).filter(Boolean);
+  const seen = new Set(parts.map(pathEntryKey));
+  const added = [];
+  for (const d of dirsToAdd) {
+    const key = pathEntryKey(d);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    added.push(d);
+  }
+  // 保持传入顺序前置
+  const next = added.concat(parts);
+  return { path: next.join(delimiter), added, already: dirsToAdd.length - added.length };
+}
+
+function prependProcessPath(dirs) {
+  if (!dirs || !dirs.length) return;
+  const delim = PLATFORM_TC.pathDelimiter || path.delimiter;
+  const cur = String(process.env.PATH || '');
+  process.env.PATH = mergePathEntries(cur, dirs, delim).path;
+}
+
+function syncSystemPath(status) {
+  const dirs = collectToolchainPathDirs(status);
+  if (!dirs.length) return { ok: false, added: [], dirs: [], message: 'no toolchain dirs' };
+  prependProcessPath(dirs);
+  if (process.platform === 'win32') {
+    try {
+      const userPath = readWindowsUserPath();
+      const merged = mergePathEntries(userPath, dirs, ';');
+      if (merged.added.length) {
+        writeWindowsUserPath(merged.path);
+        bus.send(`[环境] 已写入用户 PATH（新增 ${merged.added.length} 项）`, 'success');
+        for (const d of merged.added) bus.send(`[环境] PATH += ${d}`, 'info');
+        bus.send('[环境] 已打开的终端需重开后才能使用新 PATH', 'info');
+      } else {
+        bus.send('[环境] 工具链目录已在用户 PATH 中，无需重复添加', 'info');
+      }
+      return { ok: true, added: merged.added, dirs, already: merged.already, scope: 'user' };
+    } catch (e) {
+      const msg = e && e.message ? e.message : String(e);
+      bus.send(`[环境] 写入系统 PATH 失败: ${msg}`, 'error');
+      bus.send('[环境] 当前进程 PATH 已临时注入，仅对本软件子进程生效', 'info');
+      return { ok: false, added: [], dirs, error: msg, scope: 'process-only' };
+    }
+  }
+  bus.send(`[环境] 已注入本进程 PATH（${dirs.length} 项）；mac/Linux 未改写 shell 配置`, 'info');
+  for (const d of dirs) bus.send(`[环境] PATH += ${d}`, 'info');
+  return { ok: true, added: dirs, dirs, scope: 'process-only' };
 }
 
 function findExecutableOnPath(name) {
@@ -400,7 +525,8 @@ async function installToolchain(cfg = {}) {
   }
   bus.send(`[环境] ✓ 编译环境就绪：${APPLETS.length} 个命令（新建 ${created} 个）`, 'success');
   bus.send(`[环境] 目录: ${dir}`, 'info');
-  return { installed: true, dir, count: APPLETS.length };
+  const pathSync = syncSystemPath({ busybox: true });
+  return { installed: true, dir, count: APPLETS.length, pathSync };
 }
 
 async function installLocalPyocd(force = false) {
@@ -681,7 +807,11 @@ async function installDefaultToolchain(cfg = {}, opts = {}) {
   const ok = !!(st.gccBin && st.makeBin && st.pyocdBin && st.openocdBin);
   bus.send(ok ? '[环境] ✓ 默认工具链已就绪（pyOCD/OpenOCD 使用默认工具链目录 toolchain/）'
           : '[环境] ✗ 默认工具链未完全就绪，请查看上面日志', ok ? 'success' : 'error');
-  return Object.assign({ ok }, st);
+  let pathSync = null;
+  if (ok || st.gccBin || st.makeBin || st.pyocdBin || st.openocdBin) {
+    pathSync = syncSystemPath(st);
+  }
+  return Object.assign({ ok, pathSync }, st);
 }
 
 module.exports = {
@@ -717,5 +847,8 @@ module.exports = {
   installLocalStcgal,
   installLocalEsptool,
   downloadAndExtract,
-  installDefaultToolchain
+  installDefaultToolchain,
+  collectToolchainPathDirs,
+  mergePathEntries,
+  syncSystemPath
 };
