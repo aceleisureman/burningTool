@@ -12,6 +12,7 @@ const { createOutput } = require('./output');
 const { createStatusBar } = require('./statusBar');
 const { loadFlashConfig, setProjectDir, onConfigChange } = require('./config');
 const { createFlashService } = require('./flashService');
+const { createEsp32Service } = require('./esp32Service');
 const {
   detectProject,
   pickProjectDir,
@@ -72,7 +73,16 @@ function activate(context) {
     openProjectInVscode
   });
 
-  const provider = new Stm32FlashViewProvider(context.extensionUri, service);
+  const esp32 = createEsp32Service({
+    output,
+    statusBar,
+    getConfig: loadFlashConfig
+  });
+
+  const provider = new Stm32FlashViewProvider(context.extensionUri, {
+    stm32: service,
+    esp32
+  });
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(Stm32FlashViewProvider.viewType, provider, {
       webviewOptions: { retainContextWhenHidden: true }
@@ -81,6 +91,7 @@ function activate(context) {
 
   registerCommands(context, {
     service,
+    esp32,
     output,
     pickProjectDir,
     ensureProjectDir,
@@ -90,6 +101,7 @@ function activate(context) {
   context.subscriptions.push(
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
       service.refreshState().catch(() => {});
+      if (esp32 && esp32.refreshProjectFromWorkspace) esp32.refreshProjectFromWorkspace();
       provider.refresh();
       const { dir, source } = resolveProjectDir();
       if (dir && source === 'workspace') {
@@ -102,11 +114,13 @@ function activate(context) {
     }),
     vscode.window.onDidChangeActiveTextEditor(() => {
       service.refreshState().catch(() => {});
+      if (esp32 && esp32.refreshProjectFromWorkspace) esp32.refreshProjectFromWorkspace();
       provider.refresh();
     }),
     onConfigChange(() => {
       applySharedPaths();
       service.refreshState().catch(() => {});
+      if (esp32 && esp32.refreshProjectFromWorkspace) esp32.refreshProjectFromWorkspace();
       provider.refresh();
     }),
     statusBar.item,
@@ -125,7 +139,7 @@ function activate(context) {
     }
   }).catch(() => {});
 
-  output.append('[系统] STM32 固件烧录扩展已激活', 'info');
+  output.append('[系统] MCU-Assistant 已激活（STM32 / ESP32）', 'info');
   output.append(`[系统] 平台: ${platformId()} (${process.platform}/${process.arch})`, 'info');
   output.append(`[系统] 共用工具链: ${roots0.toolchainRoot}${roots0.hasToolchain ? '' : '（尚未安装，可先在 MCU 工具箱安装）'}`, 'info');
   output.append(`[系统] 共用 userData: ${roots0.userDataDir}`, 'info');
@@ -133,6 +147,9 @@ function activate(context) {
     output.append('[系统] 已读取 MCU 工具箱配置（settings 未填项将回退桌面端路径）', 'info');
   }
   output.append(`[系统] ${platformHint()}`, 'info');
+  // 预热 ESP32 esptool / 串口列表
+  esp32.refreshTool().catch(() => {});
+  esp32.refreshPorts().catch(() => {});
 }
 
 function deactivate() {

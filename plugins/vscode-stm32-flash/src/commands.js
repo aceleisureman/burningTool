@@ -9,7 +9,7 @@ const { listRecentProjectInfos } = require('./recentStore');
  * @param {object} deps
  */
 function registerCommands(context, deps) {
-  const { service, output, pickProjectDir, ensureProjectDir, provider } = deps;
+  const { service, esp32, output, pickProjectDir, ensureProjectDir, provider } = deps;
 
   const cmds = [
     ['stm32Flash.selectProject', async () => {
@@ -86,6 +86,37 @@ function registerCommands(context, deps) {
     ['stm32Flash.openOutput', () => output.show(false)],
     ['stm32Flash.openSettings', () => {
       vscode.commands.executeCommand('workbench.action.openSettings', 'stm32Flash');
+    }],
+    // ── ESP32 ──
+    ['esp32.flash', async () => {
+      if (!esp32) {
+        vscode.window.showWarningMessage('ESP32 服务未就绪');
+        return;
+      }
+      await esp32.doFlash();
+      provider.refresh();
+    }],
+    ['esp32.erase', async () => {
+      if (!esp32) return;
+      await esp32.doErase();
+      provider.refresh();
+    }],
+    ['esp32.refreshPorts', async () => {
+      if (!esp32) return;
+      await esp32.refreshPorts();
+      provider.refresh();
+    }],
+    ['esp32.pickFirmware', async () => {
+      if (!esp32) return;
+      const uris = await vscode.window.showOpenDialog({
+        canSelectFiles: true,
+        canSelectFolders: false,
+        canSelectMany: false,
+        filters: { 'ESP32 固件': ['bin'] },
+        openLabel: '选择固件'
+      });
+      if (uris && uris[0]) esp32.update({ firmwarePath: uris[0].fsPath });
+      provider.refresh();
     }]
   ];
 

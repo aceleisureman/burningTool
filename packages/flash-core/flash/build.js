@@ -15,12 +15,21 @@ const {
   findExecutableOnPath
 } = require('../toolchain/toolchain');
 const { detectBuildSystem, makeTargetOverrideArgs, findKeilProject } = require('./project');
+const { compileArduino } = require('./arduino');
 
 async function compile(projectDir, cfg) {
   const sys = detectBuildSystem(projectDir, cfg);
   bus.send(`[编译] 目录: ${projectDir}`, 'step');
-  bus.send(`[编译] 编译方式: ${sys === 'keil' ? 'Keil uVision5 (UV4)' : 'Makefile (GCC)'}`, 'info');
-  return sys === 'keil' ? compileKeil(projectDir, cfg) : compileMake(projectDir, cfg);
+  if (sys === 'keil') {
+    bus.send('[编译] 编译方式: Keil uVision5 (UV4)', 'info');
+    return compileKeil(projectDir, cfg);
+  }
+  if (sys === 'arduino') {
+    bus.send('[编译] 编译方式: Arduino (arduino-cli)', 'info');
+    return compileArduino(projectDir, cfg);
+  }
+  bus.send('[编译] 编译方式: Makefile (GCC)', 'info');
+  return compileMake(projectDir, cfg);
 }
 
 function resolveMakeExecutable(cfg) {

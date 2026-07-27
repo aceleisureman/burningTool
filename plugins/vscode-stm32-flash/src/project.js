@@ -6,7 +6,8 @@ const vscode = require('vscode');
 const {
   findKeilProject,
   findIocFile,
-  detectBuildSystem
+  detectBuildSystem,
+  findArduinoSketch
 } = require('../vendor/flash-core');
 const { loadFlashConfig, getConfiguredProjectDir, setProjectDir } = require('./config');
 
@@ -23,6 +24,9 @@ function detectProject(dir, cfg) {
       keilProject: '',
       hasIoc: false,
       iocFile: '',
+      hasArduino: false,
+      arduinoSketch: '',
+      arduinoSketchDir: '',
       buildSystem: null,
       projectValid: false,
       projectKind: 'none',
@@ -33,8 +37,10 @@ function detectProject(dir, cfg) {
   const hasMakefile = fs.existsSync(path.join(dir, 'Makefile'));
   const keilProj = findKeilProject(dir);
   const iocFile = findIocFile(dir);
+  const arduino = typeof findArduinoSketch === 'function' ? findArduinoSketch(dir) : null;
   const hasKeil = !!keilProj;
   const hasIoc = !!iocFile;
+  const hasArduino = !!arduino;
   const buildSystem = detectBuildSystem(dir, cfg || loadFlashConfig(), keilProj);
 
   let projectKind = 'unknown';
@@ -45,6 +51,9 @@ function detectProject(dir, cfg) {
   } else if (hasKeil) {
     projectKind = 'keil';
     projectKindLabel = 'Keil 工程';
+  } else if (hasArduino) {
+    projectKind = 'arduino';
+    projectKindLabel = `Arduino 工程（${arduino.name}.ino）`;
   } else if (hasMakefile) {
     projectKind = 'makefile';
     projectKindLabel = 'Makefile / GCC 工程';
@@ -61,8 +70,11 @@ function detectProject(dir, cfg) {
     keilProject: keilProj ? path.relative(dir, keilProj) || path.basename(keilProj) : '',
     hasIoc,
     iocFile: iocFile ? path.relative(dir, iocFile) || path.basename(iocFile) : '',
+    hasArduino,
+    arduinoSketch: arduino ? path.relative(dir, arduino.sketchFile) || path.basename(arduino.sketchFile) : '',
+    arduinoSketchDir: arduino ? arduino.sketchDir : '',
     buildSystem,
-    projectValid: !!(hasMakefile || keilProj),
+    projectValid: !!(hasMakefile || keilProj || hasArduino),
     projectKind,
     projectKindLabel,
     source: ''

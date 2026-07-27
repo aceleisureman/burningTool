@@ -8,15 +8,25 @@ class Stm32FlashViewProvider {
 
   /**
    * @param {vscode.Uri} extensionUri
-   * @param {*} service
+   * @param {{ stm32: any, esp32?: any }} services
    */
-  constructor(extensionUri, service) {
+  constructor(extensionUri, services) {
     this._extensionUri = extensionUri;
-    this._service = service;
+    // 兼容旧调用：传单个 service 时视为 stm32
+    if (services && services.doBuild) {
+      this._service = services;
+      this._esp32 = null;
+    } else {
+      this._service = services && services.stm32;
+      this._esp32 = services && services.esp32;
+    }
     /** @type {vscode.WebviewView | undefined} */
     this._view = undefined;
     this._onState = () => this.refresh();
-    service.on('state', this._onState);
+    if (this._service && this._service.on) this._service.on('state', this._onState);
+    if (this._esp32 && this._esp32.onChange) {
+      this._offEsp32 = this._esp32.onChange(() => this.refresh());
+    }
   }
 
   /**
@@ -34,6 +44,12 @@ class Stm32FlashViewProvider {
       try {
         switch (msg.type) {
           case 'ready':
+            if (this._esp32) {
+              await Promise.all([
+                this._esp32.refreshTool().catch(() => {}),
+                this._esp32.refreshPorts().catch(() => {})
+              ]);
+            }
             this.refresh();
             break;
           case 'selectProject':
@@ -84,6 +100,45 @@ class Stm32FlashViewProvider {
             await updateSetting('connectUnderReset', !!msg.value);
             await this._service.refreshState();
             break;
+          // ── ESP32 ──
+          case 'esp32RefreshPorts':
+            if (this._esp32) await this._esp32.refreshPorts();
+            break;
+          case 'esp32RefreshTool':
+            if (this._esp32) await this._esp32.refreshTool();
+            break;
+          case 'esp32Update':
+            if (this._esp32) this._esp32.update(msg.partial || {});
+            break;
+          case 'esp32PickFirmware': {
+            if (!this._esp32) break;
+            const uris = await vscode.window.showOpenDialog({
+              canSelectFiles: true,
+              canSelectFolders: false,
+              canSelectMany: false,
+              filters: { 'ESP32 固件': ['bin'] },
+              openLabel: '选择固件'
+            });
+            if (uris && uris[0]) this._esp32.update({ firmwarePath: uris[0].fsPath });
+            break;
+          }
+          case 'esp32Flash':
+            if (this._esp32) await this._esp32.doFlash(msg.opts || {});
+            break;
+          case 'esp32Build':
+            if (this._esp32) await this._esp32.doBuild();
+            break;
+          case 'esp32BuildAndFlash':
+            if (this._esp32) await this._esp32.doBuildAndFlash();
+            break;
+          case 'esp32Erase':
+            if (this._esp32) await this._esp32.doErase();
+            break;
+          case 'esp32RefreshProject':
+            if (this._esp32 && this._esp32.refreshProjectFromWorkspace) {
+              this._esp32.refreshProjectFromWorkspace();
+            }
+            break;
           default:
             break;
         }
@@ -98,7 +153,11 @@ class Stm32FlashViewProvider {
 
   refresh() {
     if (!this._view) return;
-    this._view.webview.postMessage({ type: 'state', state: this._service.getState() });
+    this._view.webview.postMessage({
+      type: 'state',
+      state: this._service ? this._service.getState() : null,
+      esp32: this._esp32 ? this._esp32.getState() : null
+    });
   }
 
   /**
@@ -531,7 +590,7 @@ class Stm32FlashViewProvider {
     .detect-banner .db-title { font-weight: 700; }
     .detect-banner .db-sub { color: var(--fg-muted); font-weight: 500; }
     .seg {
-      display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 3px;
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(70px, 1fr)); gap: 3px;
       padding: 3px; border-radius: 8px;
       background: var(--bg); border: 1px solid var(--border);
     }
@@ -548,9 +607,55 @@ class Stm32FlashViewProvider {
       color: var(--fg-muted); cursor: pointer; user-select: none; font-size: 11.5px;
     }
     label.opt input { accent-color: var(--btn-bg); margin: 0; }
+
+    /* ── Platform tabs ── */
+    .tabs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4px;
+      padding: 3px;
+      margin-bottom: 10px;
+      border-radius: 8px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      flex: 0 0 auto;
+    }
+    .tab {
+      border: none;
+      background: transparent;
+      color: var(--fg-muted);
+      padding: 7px 8px;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .tab.active { background: var(--btn-bg); color: var(--btn-fg); }
+    .tab:hover:not(.active) { background: var(--bg-hover); color: var(--fg); }
+    .pane { display: none; flex: 1 1 auto; min-height: 0; flex-direction: column; overflow: hidden; }
+    .pane.active { display: flex; }
+    .field { margin-bottom: 8px; }
+    .field label { display: block; font-size: 10.5px; color: var(--fg-muted); margin-bottom: 4px; }
+    .field select, .field input[type="text"] {
+      width: 100%; box-sizing: border-box; background: var(--bg); color: var(--fg);
+      border: 1px solid var(--border); border-radius: var(--r-sm); padding: 6px 8px; font: inherit;
+    }
+    .field-row { display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: end; }
+    .check-row { display: flex; flex-wrap: wrap; gap: 10px; margin: 6px 0 8px; }
+    .fw-box {
+      padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--r-sm);
+      background: var(--bg); font-family: var(--font-mono); font-size: 11px;
+      word-break: break-all; min-height: 34px; color: var(--fg);
+    }
+    .fw-box.empty { color: var(--fg-muted); font-family: var(--font); }
   </style>
 </head>
 <body>
+  <div class="tabs" id="platformTabs">
+    <button type="button" class="tab active" data-tab="stm32">STM32</button>
+    <button type="button" class="tab" data-tab="esp32">ESP32</button>
+  </div>
+  <div class="pane active" id="pane-stm32">
   <div class="layout-top">
   <header class="hero">
     <div class="logo" aria-hidden="true">
@@ -570,37 +675,42 @@ class Stm32FlashViewProvider {
     </div>
     <div class="icon-bar icon-bar-top" id="opsBar">
       <button id="btnBuild" class="icon-btn tip" data-tip="编译工程（Make/Keil）" title="编译工程（Make/Keil）" aria-label="编译">
-        <!-- hammer / build -->
-        <svg viewBox="0 0 24 24" fill="none"><path d="M14.5 5.5l4 4-8.2 8.2c-.4.4-1 .4-1.4 0l-2.6-2.6c-.4-.4-.4-1 0-1.4L14.5 5.5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M13 7l4 4M5.5 18.5h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"/></svg>
+        <!-- wrench / build -->
+        <svg viewBox="0 0 24 24" fill="none"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
       </button>
       <button id="btnFlash" class="icon-btn tip" data-tip="烧录固件到芯片" title="烧录固件到芯片" aria-label="烧录">
         <!-- chip download -->
-        <svg viewBox="0 0 24 24" fill="none"><rect x="7" y="7" width="10" height="10" rx="1.2" stroke="currentColor" stroke-width="1.5"/><path d="M10 4.8v2.2M14 4.8v2.2M10 17v2.2M14 17v2.2M4.8 10h2.2M4.8 14h2.2M17 10h2.2M17 14h2.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"/><path d="M12 9.2v4.2M10.2 11.8L12 13.6l1.8-1.8" stroke="currentColor" stroke-width="1.5" stroke-linecap="square" stroke-linejoin="miter"/></svg>
+        <svg viewBox="0 0 24 24" fill="none"><rect x="6.5" y="6.5" width="11" height="11" rx="1.5" stroke="currentColor" stroke-width="1.5"/><path d="M9.5 3.5v3M14.5 3.5v3M9.5 17.5v3M14.5 17.5v3M3.5 9.5h3M3.5 14.5h3M17.5 9.5h3M17.5 14.5h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"/><path d="M12 9.2v4M10 11.4l2 2 2-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="square" stroke-linejoin="miter"/></svg>
       </button>
       <button id="btnOne" class="icon-btn primary tip" data-tip="一键：编译成功后自动烧录" title="一键：编译成功后自动烧录" aria-label="一键编译烧录">
-        <!-- play + bolt -->
-        <svg viewBox="0 0 24 24" fill="none"><path d="M8 6.2v11.6L17.5 12 8 6.2z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M17.8 7.2l-1.4 2.4h1.8L16.4 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="square" stroke-linejoin="miter"/></svg>
+        <!-- zap / one-shot -->
+        <svg viewBox="0 0 24 24" fill="none"><path d="M13 2.5L3.5 14h9l-1 8L20.5 10h-9l1.5-7.5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
       </button>
       <span class="icon-sep" aria-hidden="true"></span>
       <button id="btnProbe" class="icon-btn tip" data-tip="检测编译器与烧录器是否在线" title="检测编译器与烧录器是否在线" aria-label="检测烧录器">
-        <!-- usb / link probe -->
-        <svg viewBox="0 0 24 24" fill="none"><path d="M9 7.5V4.8h6V7.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"/><rect x="8" y="7.5" width="8" height="5.2" rx="1" stroke="currentColor" stroke-width="1.5"/><path d="M10.2 12.7v3.1c0 2 1.6 3.6 3.6 3.6h.8M13.8 12.7v2.2c0 1.5 1.2 2.7 2.7 2.7h.3" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"/></svg>
+        <!-- radar / detect -->
+        <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="1.5" fill="currentColor"/><path d="M12 12L19 5M12 3a9 9 0 1 0 9 9M12 7a5 5 0 1 0 5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"/></svg>
       </button>
       <button id="btnChip" class="icon-btn tip" data-tip="读取芯片信息" title="读取芯片信息" aria-label="芯片信息">
-        <svg viewBox="0 0 24 24" fill="none"><rect x="7" y="7" width="10" height="10" rx="1.2" stroke="currentColor" stroke-width="1.5"/><path d="M10 4.5v2.5M14 4.5v2.5M10 17v2.5M14 17v2.5M4.5 10h2.5M4.5 14h2.5M17 10h2.5M17 14h2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/></svg>
+        <!-- cpu -->
+        <svg viewBox="0 0 24 24" fill="none"><rect x="5" y="5" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.5"/><rect x="9.5" y="9.5" width="5" height="5" rx="0.5" stroke="currentColor" stroke-width="1.5"/><path d="M9 2.5V5M15 2.5V5M9 19v2.5M15 19v2.5M2.5 9H5M2.5 15H5M19 9h2.5M19 15h2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"/></svg>
       </button>
       <button id="btnGen" class="icon-btn tip" data-tip="由 CubeMX 生成 Makefile" title="由 CubeMX 生成 Makefile" aria-label="生成 Makefile" style="display:none">
-        <svg viewBox="0 0 24 24" fill="none"><path d="M6 4.8h8.2L18 8.6V19.2H6V4.8z" stroke="currentColor" stroke-width="1.5"/><path d="M14 4.9V8.7H18M9 12.2h6M9 15.2h4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"/></svg>
+        <!-- file-plus / generate -->
+        <svg viewBox="0 0 24 24" fill="none"><path d="M6 4.5h8l4 4V19.5H6V4.5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M13.8 4.5V9H18" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M12 12v5M9.5 14.5h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"/></svg>
       </button>
       <span class="icon-sep" aria-hidden="true"></span>
       <button id="btnLog" class="icon-btn tip" data-tip="打开编译/烧录日志" title="打开编译/烧录日志" aria-label="打开日志">
-        <svg viewBox="0 0 24 24" fill="none"><path d="M6 4.5h9l3 3V19.5H6V4.5z" stroke="currentColor" stroke-width="1.5"/><path d="M9 10.5h6M9 13.5h6M9 16.5h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"/></svg>
+        <!-- terminal -->
+        <svg viewBox="0 0 24 24" fill="none"><rect x="3.5" y="4.5" width="17" height="15" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M7.5 9.5l3 3-3 3M12.5 15.5h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="square" stroke-linejoin="miter"/></svg>
       </button>
       <button id="btnSettings" class="icon-btn tip" data-tip="打开插件设置" title="打开插件设置" aria-label="打开设置">
-        <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.5"/><path d="M12 3.8v2M12 18.2v2M3.8 12h2M18.2 12h2M6.1 6.1l1.4 1.4M16.5 16.5l1.4 1.4M17.9 6.1l-1.4 1.4M7.5 16.5l-1.4 1.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"/></svg>
+        <!-- gear -->
+        <svg viewBox="0 0 24 24" fill="none"><path d="M12.22 3h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V19a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V5a2 2 0 0 0-2-2z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.5"/></svg>
       </button>
       <button id="btnCancel" class="icon-btn danger tip" data-tip="取消当前编译/烧录任务" title="取消当前编译/烧录任务" aria-label="取消任务">
-        <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.5"/><path d="M9 9l6 6M15 9l-6 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"/></svg>
+        <!-- circle-x -->
+        <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.5"/><path d="M9 9l6 6M15 9l-6 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
       </button>
     </div>
     <div class="ready-bar" id="readyBar">
@@ -640,6 +750,7 @@ class Stm32FlashViewProvider {
       <button type="button" data-method="pyocd">pyOCD</button>
       <button type="button" data-method="openocd">OpenOCD</button>
       <button type="button" data-method="keil" id="btnKeil">Keil</button>
+      <button type="button" data-method="arduino" id="btnArduino">Arduino</button>
     </div>
     <div class="opts" id="pyocdOpts">
       <label class="opt"><input type="checkbox" id="autoDetect" /> 自动识别芯片</label>
@@ -658,6 +769,142 @@ class Stm32FlashViewProvider {
     </div>
     <div class="hint">点击切换 VS Code 工程 · 与 MCU 工具箱互通</div>
   </section>
+
+  </div><!-- /pane-stm32 -->
+
+  <div class="pane" id="pane-esp32">
+    <section class="card card-ops-top">
+      <div class="card-hd"><h2 class="card-title">ESP32</h2></div>
+      <div id="espModeBanner" class="detect-banner warn">
+        <span class="db-title">工程模式</span>
+        <span class="db-sub">检测中…</span>
+      </div>
+      <div class="icon-bar icon-bar-top">
+        <button id="espBuild" class="icon-btn tip" data-tip="Arduino 编译（arduino-cli compile）" title="Arduino 编译" aria-label="编译">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M14.5 5.5l4 4-8.2 8.2c-.4.4-1 .4-1.4 0l-2.6-2.6c-.4-.4-.4-1 0-1.4L14.5 5.5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M13 7l4 4M5.5 18.5h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"/></svg>
+        </button>
+        <button id="espFlash" class="icon-btn tip" data-tip="烧录（Arduino 用 arduino-cli；否则 esptool）" title="烧录" aria-label="烧录">
+          <svg viewBox="0 0 24 24" fill="none"><rect x="7" y="7" width="10" height="10" rx="1.2" stroke="currentColor" stroke-width="1.5"/><path d="M12 9.2v4.2M10.2 11.8L12 13.6l1.8-1.8" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"/></svg>
+        </button>
+        <button id="espOne" class="icon-btn primary tip" data-tip="一键编译烧录（Arduino）/ 一键烧录（.bin）" title="一键" aria-label="一键">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M8 6.2v11.6L17.5 12 8 6.2z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+        </button>
+        <span class="icon-sep"></span>
+        <button id="espErase" class="icon-btn tip" data-tip="全片擦除 Flash（esptool）" title="全片擦除" aria-label="擦除">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M6 8h12M9.5 8V6.5h5V8M8.5 8l.7 11h5.6l.7-11" stroke="currentColor" stroke-width="1.5"/></svg>
+        </button>
+        <button id="espRefreshPorts" class="icon-btn tip" data-tip="刷新串口列表" title="刷新串口" aria-label="刷新串口">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M6.5 10.5A5.5 5.5 0 0 1 17 8.2M17.5 13.5A5.5 5.5 0 0 1 7 15.8" stroke="currentColor" stroke-width="1.5"/><path d="M17 5.5v3h-3M7 18.5v-3h3" stroke="currentColor" stroke-width="1.5"/></svg>
+        </button>
+        <button id="espRefreshTool" class="icon-btn tip" data-tip="检测 arduino-cli / esptool 与当前工程" title="检测工具与工程" aria-label="检测">
+          <svg viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="5.5" stroke="currentColor" stroke-width="1.5"/><path d="M15.5 15.5L20 20" stroke="currentColor" stroke-width="1.5"/></svg>
+        </button>
+        <button id="espLog" class="icon-btn tip" data-tip="打开日志" title="打开日志" aria-label="日志">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M6 4.5h9l3 3V19.5H6V4.5z" stroke="currentColor" stroke-width="1.5"/><path d="M9 10.5h6M9 13.5h6M9 16.5h4" stroke="currentColor" stroke-width="1.5"/></svg>
+        </button>
+      </div>
+      <div class="ready-bar" style="margin-top:8px">
+        <div class="ready-item" id="espToolReady"><div class="ready-k">工具</div><div class="ready-v">检测中…</div></div>
+        <div class="ready-item" id="espPortReady"><div class="ready-k">串口</div><div class="ready-v">未选择</div></div>
+      </div>
+      <div class="hint" id="espHint">打开含 .ino 的工程将自动使用 arduino-cli；否则用 esptool 烧 .bin。</div>
+    </section>
+
+    <section class="card">
+      <div class="card-hd"><h2 class="card-title">串口 / 板型</h2></div>
+      <div class="field">
+        <label>串口</label>
+        <div class="field-row">
+          <select id="espPort"></select>
+          <button id="espRefreshPorts2" class="icon-btn tip" data-tip="刷新串口" title="刷新串口" aria-label="刷新">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M6.5 10.5A5.5 5.5 0 0 1 17 8.2M17.5 13.5A5.5 5.5 0 0 1 7 15.8" stroke="currentColor" stroke-width="1.5"/><path d="M17 5.5v3h-3M7 18.5v-3h3" stroke="currentColor" stroke-width="1.5"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="field" id="espFqbnField">
+        <label>Arduino FQBN（板型）</label>
+        <select id="espFqbn">
+          <option value="esp32:esp32:esp32">ESP32 Dev Module</option>
+          <option value="esp32:esp32:esp32s2">ESP32-S2</option>
+          <option value="esp32:esp32:esp32s3">ESP32-S3</option>
+          <option value="esp32:esp32:esp32c3">ESP32-C3</option>
+          <option value="esp32:esp32:esp32c6">ESP32-C6</option>
+        </select>
+      </div>
+      <div class="field" id="espChipField">
+        <label>esptool 芯片</label>
+        <select id="espChip">
+          <option value="auto">自动探测</option>
+          <option value="esp32">ESP32</option>
+          <option value="esp32s2">ESP32-S2</option>
+          <option value="esp32s3">ESP32-S3</option>
+          <option value="esp32c2">ESP32-C2</option>
+          <option value="esp32c3">ESP32-C3</option>
+          <option value="esp32c6">ESP32-C6</option>
+          <option value="esp32h2">ESP32-H2</option>
+          <option value="esp32p4">ESP32-P4</option>
+          <option value="esp8266">ESP8266</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>波特率</label>
+        <select id="espBaud">
+          <option value="115200">115200</option>
+          <option value="230400">230400</option>
+          <option value="460800" selected>460800</option>
+          <option value="921600">921600</option>
+          <option value="1500000">1500000</option>
+          <option value="2000000">2000000</option>
+        </select>
+      </div>
+    </section>
+
+    <section class="card" id="espBinCard">
+      <div class="card-hd">
+        <h2 class="card-title">固件（esptool）</h2>
+        <button id="espPickFw" class="icon-btn tip" data-tip="选择 .bin 固件" title="选择 .bin 固件" aria-label="选择固件">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M6 4.8h8.2L18 8.6V19.2H6V4.8z" stroke="currentColor" stroke-width="1.5"/><path d="M14 4.9V8.7H18" stroke="currentColor" stroke-width="1.5"/></svg>
+        </button>
+      </div>
+      <div id="espFwBox" class="fw-box empty">未选择固件（仅支持 .bin）</div>
+      <div class="field" style="margin-top:8px">
+        <label>烧录地址</label>
+        <input id="espOffset" type="text" value="0x0" placeholder="0x0 / 0x10000" />
+      </div>
+      <div class="check-row">
+        <label class="opt"><input type="checkbox" id="espEraseBefore" /> 烧录前全片擦除</label>
+      </div>
+    </section>
+
+    <section class="card" id="espArduinoCard" style="display:none">
+      <div class="card-hd"><h2 class="card-title">Arduino 工程信息</h2></div>
+      <div class="info-grid">
+        <div class="info-item wide"><div class="info-label">草图</div><div class="info-value" id="espSketchName">—</div></div>
+        <div class="info-item wide"><div class="info-label">目录</div><div class="info-value mono" id="espSketchDir">—</div></div>
+        <div class="info-item wide"><div class="info-label">FQBN</div><div class="info-value mono" id="espSketchFqbn">—</div></div>
+      </div>
+      <div class="hint">编译/烧录使用 arduino-cli；请先安装核心：arduino-cli core install esp32:esp32</div>
+    </section>
+
+    <section class="card" id="espAdvCard" style="flex:1 1 auto;min-height:0">
+      <div class="card-hd"><h2 class="card-title">esptool 高级参数</h2></div>
+      <div class="field"><label>Flash Mode</label>
+        <select id="espFlashMode"><option value="keep">keep</option><option value="qio">qio</option><option value="qout">qout</option><option value="dio">dio</option><option value="dout">dout</option></select>
+      </div>
+      <div class="field"><label>Flash Freq</label>
+        <select id="espFlashFreq"><option value="keep">keep</option><option value="80m">80m</option><option value="40m">40m</option><option value="26m">26m</option><option value="20m">20m</option></select>
+      </div>
+      <div class="field"><label>Flash Size</label>
+        <select id="espFlashSize"><option value="detect">detect</option><option value="keep">keep</option><option value="1MB">1MB</option><option value="2MB">2MB</option><option value="4MB">4MB</option><option value="8MB">8MB</option><option value="16MB">16MB</option></select>
+      </div>
+      <div class="field"><label>复位 before / after</label>
+        <div class="field-row">
+          <select id="espBefore"><option value="default_reset">default_reset</option><option value="usb_reset">usb_reset</option><option value="no_reset">no_reset</option><option value="no_reset_no_sync">no_reset_no_sync</option></select>
+          <select id="espAfter"><option value="hard_reset">hard_reset</option><option value="soft_reset">soft_reset</option><option value="no_reset">no_reset</option><option value="no_reset_stub">no_reset_stub</option></select>
+        </div>
+      </div>
+    </section>
+  </div><!-- /pane-esp32 -->
 
   <script>
     const vscode = acquireVsCodeApi();
@@ -701,11 +948,13 @@ class Stm32FlashViewProvider {
       return '<span class="pill' + (cls ? ' ' + cls : '') + '">' + escapeHtml(text) + '</span>';
     }
     function setMethod(method, isWindows) {
+      const m = method || 'pyocd';
       document.querySelectorAll('#methodSeg button').forEach((btn) => {
-        btn.classList.toggle('active', btn.dataset.method === method);
+        btn.classList.toggle('active', btn.dataset.method === m);
         if (btn.dataset.method === 'keil') btn.disabled = !isWindows;
       });
-      $('pyocdOpts').style.display = method === 'pyocd' ? 'flex' : 'none';
+      // pyOCD 专属选项
+      $('pyocdOpts').style.display = (m === 'pyocd' || m === 'auto') ? 'flex' : 'none';
     }
 
     function renderRecent(list, currentDir) {
@@ -786,6 +1035,9 @@ class Stm32FlashViewProvider {
       if (kind === 'keil') {
         banner.className = 'detect-banner ok';
         banner.innerHTML = '<span class="db-title">Keil 工程</span><span class="db-sub">' + escapeHtml(p.keilProject || '.uvprojx') + '</span>';
+      } else if (kind === 'arduino') {
+        banner.className = 'detect-banner ok';
+        banner.innerHTML = '<span class="db-title">Arduino 工程</span><span class="db-sub">' + escapeHtml(p.arduinoSketch || '.ino') + ' · arduino-cli</span>';
       } else if (kind === 'makefile') {
         banner.className = 'detect-banner ok';
         banner.innerHTML = '<span class="db-title">Makefile 工程</span><span class="db-sub">GCC / Make 编译</span>';
@@ -801,7 +1053,7 @@ class Stm32FlashViewProvider {
       }
 
       const build = p.projectValid
-        ? (p.buildSystem === 'keil' ? 'Keil UV4' : 'Make / GCC')
+        ? (p.buildSystem === 'keil' ? 'Keil UV4' : p.buildSystem === 'arduino' ? 'Arduino CLI' : 'Make / GCC')
         : (kind === 'cubemx' ? '需生成 Makefile' : '不可编译');
       const source = p.source === 'workspace' ? '当前工作区'
         : p.source === 'settings' ? '手动选择' : '—';
@@ -940,8 +1192,167 @@ class Stm32FlashViewProvider {
 
     window.addEventListener('message', (e) => {
       const msg = e.data;
-      if (msg && msg.type === 'state') render(msg.state);
+      if (!msg) return;
+      if (msg.type === 'state') {
+        if (msg.state) render(msg.state);
+        if (msg.esp32) renderEsp32(msg.esp32);
+      }
     });
+
+    // tabs
+    document.querySelectorAll('#platformTabs .tab').forEach((btn) => {
+      btn.onclick = () => {
+        document.querySelectorAll('#platformTabs .tab').forEach((b) => b.classList.toggle('active', b === btn));
+        const tab = btn.dataset.tab;
+        document.getElementById('pane-stm32').classList.toggle('active', tab === 'stm32');
+        document.getElementById('pane-esp32').classList.toggle('active', tab === 'esp32');
+      };
+    });
+
+    function renderEsp32(s) {
+      if (!s) return;
+      const isArduino = !!s.isArduino;
+      const banner = document.getElementById('espModeBanner');
+      if (banner) {
+        banner.className = 'detect-banner ' + (isArduino ? 'ok' : (s.projectDir ? 'warn' : 'err'));
+        banner.innerHTML = '<span class="db-title">' + (isArduino ? 'Arduino 工程' : (s.projectDir ? '固件模式' : '未打开工程')) +
+          '</span><span class="db-sub">' + escapeHtml(s.projectModeLabel || '') + '</span>';
+      }
+      // show/hide cards
+      const binCard = document.getElementById('espBinCard');
+      const arduinoCard = document.getElementById('espArduinoCard');
+      const advCard = document.getElementById('espAdvCard');
+      const fqbnField = document.getElementById('espFqbnField');
+      const chipField = document.getElementById('espChipField');
+      if (binCard) binCard.style.display = isArduino ? 'none' : '';
+      if (arduinoCard) arduinoCard.style.display = isArduino ? '' : 'none';
+      if (advCard) advCard.style.display = isArduino ? 'none' : '';
+      if (fqbnField) fqbnField.style.display = isArduino ? '' : 'none';
+      if (chipField) chipField.style.display = isArduino ? 'none' : '';
+      if (document.getElementById('espBuild')) document.getElementById('espBuild').style.display = isArduino ? 'inline-grid' : 'none';
+      if (document.getElementById('espOne')) document.getElementById('espOne').style.display = isArduino ? 'inline-grid' : 'none';
+
+      const portSel = document.getElementById('espPort');
+      if (portSel) {
+        const cur = s.portPath || '';
+        const opts = (s.ports || []).map((p) => {
+          const label = p.label && p.label !== p.path ? (p.path + ' · ' + p.label) : p.path;
+          return '<option value="' + escapeHtml(p.path) + '"' + (p.path === cur ? ' selected' : '') + '>' + escapeHtml(label) + '</option>';
+        }).join('');
+        portSel.innerHTML = opts || '<option value="">无串口</option>';
+        if (cur) portSel.value = cur;
+      }
+      const setVal = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.value = String(v); };
+      setVal('espChip', s.chip || 'auto');
+      setVal('espBaud', s.baudRate || 460800);
+      setVal('espOffset', s.flashOffset || '0x0');
+      setVal('espFlashMode', s.flashMode || 'keep');
+      setVal('espFlashFreq', s.flashFreq || 'keep');
+      setVal('espFlashSize', s.flashSize || 'detect');
+      setVal('espBefore', s.beforeReset || 'default_reset');
+      setVal('espAfter', s.afterReset || 'hard_reset');
+      setVal('espFqbn', s.arduinoFqbn || 'esp32:esp32:esp32');
+      // ensure fqbn option exists
+      const fqbnSel = document.getElementById('espFqbn');
+      if (fqbnSel && s.arduinoFqbn) {
+        const exists = Array.from(fqbnSel.options).some((o) => o.value === s.arduinoFqbn);
+        if (!exists) {
+          const o = document.createElement('option');
+          o.value = s.arduinoFqbn; o.textContent = s.arduinoFqbn;
+          fqbnSel.appendChild(o);
+          fqbnSel.value = s.arduinoFqbn;
+        }
+      }
+      const erase = document.getElementById('espEraseBefore');
+      if (erase) erase.checked = !!s.eraseBeforeWrite;
+      const fw = document.getElementById('espFwBox');
+      if (fw) {
+        if (s.firmwarePath) { fw.className = 'fw-box'; fw.textContent = s.firmwarePath; }
+        else { fw.className = 'fw-box empty'; fw.textContent = '未选择固件（仅支持 .bin）'; }
+      }
+      const sn = document.getElementById('espSketchName');
+      const sd = document.getElementById('espSketchDir');
+      const sf = document.getElementById('espSketchFqbn');
+      if (sn) sn.textContent = s.arduinoSketch || '—';
+      if (sd) sd.textContent = s.arduinoSketchDir || s.projectDir || '—';
+      if (sf) sf.textContent = s.arduinoFqbn || '—';
+
+      const tool = document.getElementById('espToolReady');
+      if (tool) {
+        const ok = !!s.toolOk;
+        tool.className = 'ready-item ' + (ok ? 'ok' : 'err');
+        tool.querySelector('.ready-k').textContent = isArduino ? 'arduino-cli' : 'esptool';
+        tool.querySelector('.ready-v').textContent = ok ? (s.toolVersion || '就绪') : (s.toolError || '未就绪');
+      }
+      const pr = document.getElementById('espPortReady');
+      if (pr) {
+        pr.className = 'ready-item ' + (s.portPath ? 'ok' : 'warn');
+        pr.querySelector('.ready-v').textContent = s.portPath || '未选择';
+      }
+      const busy = !!s.busy;
+      ['espBuild','espFlash','espOne','espErase','espPickFw','espRefreshPorts','espRefreshPorts2','espRefreshTool'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (id === 'espBuild' || id === 'espOne') el.disabled = busy || !s.canBuildAndFlash && isArduino ? (!s.canBuild && id==='espBuild') || (!s.canBuildAndFlash && id==='espOne') : busy;
+        else if (id === 'espFlash') el.disabled = busy || !s.canFlash;
+        else el.disabled = busy && id !== 'espRefreshTool';
+      });
+      // simplify disable
+      if (document.getElementById('espBuild')) document.getElementById('espBuild').disabled = busy || !isArduino || !s.toolOk || !s.projectDir;
+      if (document.getElementById('espFlash')) document.getElementById('espFlash').disabled = busy || !s.canFlash;
+      if (document.getElementById('espOne')) document.getElementById('espOne').disabled = busy || (isArduino ? !(s.toolOk && s.portPath && s.projectDir) : !s.canFlash);
+
+      const hint = document.getElementById('espHint');
+      if (hint) {
+        if (busy) { hint.className = 'hint warn'; hint.textContent = '任务进行中…'; }
+        else if (isArduino) {
+          if (!s.toolOk) { hint.className = 'hint err'; hint.textContent = s.toolError || '请安装 arduino-cli'; }
+          else if (!s.portPath) { hint.className = 'hint warn'; hint.textContent = '请选择串口后编译/烧录'; }
+          else { hint.className = 'hint ok'; hint.textContent = 'Arduino 模式 · FQBN ' + (s.arduinoFqbn || '') + ' · 可编译烧录'; }
+        } else {
+          if (!s.toolOk) { hint.className = 'hint err'; hint.textContent = s.toolError || '请安装 esptool'; }
+          else if (!s.portPath) { hint.className = 'hint warn'; hint.textContent = '请选择串口'; }
+          else if (!s.firmwarePath) { hint.className = 'hint warn'; hint.textContent = '请选择 .bin，或打开 Arduino(.ino) 工程'; }
+          else { hint.className = 'hint ok'; hint.textContent = 'esptool 模式 · 可一键烧录'; }
+        }
+      }
+    }
+
+    function bindEsp() {
+      const bindChange = (id, key, cast) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.onchange = () => {
+          let v = el.type === 'checkbox' ? el.checked : el.value;
+          if (cast === 'num') v = Number(v);
+          post('esp32Update', { partial: { [key]: v } });
+        };
+      };
+      bindChange('espPort', 'portPath');
+      bindChange('espChip', 'chip');
+      bindChange('espBaud', 'baudRate', 'num');
+      bindChange('espOffset', 'flashOffset');
+      bindChange('espFlashMode', 'flashMode');
+      bindChange('espFlashFreq', 'flashFreq');
+      bindChange('espFlashSize', 'flashSize');
+      bindChange('espBefore', 'beforeReset');
+      bindChange('espAfter', 'afterReset');
+      bindChange('espEraseBefore', 'eraseBeforeWrite');
+      bindChange('espFqbn', 'arduinoFqbn');
+      const setClick = (id, fn) => { const el = document.getElementById(id); if (el) el.onclick = fn; };
+      setClick('espBuild', () => post('esp32Build'));
+      setClick('espFlash', () => post('esp32Flash'));
+      setClick('espOne', () => post('esp32BuildAndFlash'));
+      setClick('espErase', () => post('esp32Erase'));
+      setClick('espRefreshPorts', () => post('esp32RefreshPorts'));
+      setClick('espRefreshPorts2', () => post('esp32RefreshPorts'));
+      setClick('espRefreshTool', () => { post('esp32RefreshTool'); post('esp32RefreshProject'); });
+      setClick('espPickFw', () => post('esp32PickFirmware'));
+      setClick('espLog', () => post('openOutput'));
+    }
+    bindEsp();
+
+
     post('ready');
   </script>
 </body>

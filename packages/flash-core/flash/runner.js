@@ -10,13 +10,26 @@ const { quoteOpenocdTclPath, prepareOpenocdFirmwarePath } = require('./openocd-p
 const { PLATFORM_TC } = require('../core/env');
 const { resolvePyocdPath, resolveOpenocdPath } = require('../toolchain/toolchain');
 const { PYOCD_FLASH_TIMEOUT_MS, pickProbeUid, resolveTarget, ensurePyocdTarget } = require('./probe');
-const { resolveFirmware } = require('./project');
+const { resolveFirmware, detectBuildSystem } = require('./project');
 const { runUV4 } = require('./build');
+const { flashArduino } = require('./arduino');
 
 async function flash(projectDir, cfg) {
-  const method = (cfg.flashMethod || 'pyocd');
+  const method = (cfg.flashMethod || 'auto');
+  const sys = detectBuildSystem(projectDir, cfg);
+
+  // Arduino 工程：默认 arduino-cli upload；若用户强制 pyocd/openocd/keil 则烧编译产物
+  if (sys === 'arduino' || method === 'arduino') {
+    if (method === 'pyocd' || method === 'openocd' || method === 'keil') {
+      // fall through to probe/keil flashers with resolveFirmware()
+    } else {
+      return flashArduino(projectDir, cfg);
+    }
+  }
+
   if (method === 'keil') return flashKeil(projectDir, cfg);
   if (method === 'openocd') return flashOpenocd(projectDir, cfg);
+  if (method === 'arduino') return flashArduino(projectDir, cfg);
   return flashPyocd(projectDir, cfg);
 }
 

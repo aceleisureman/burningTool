@@ -54,6 +54,8 @@ function findIocFile(projectDir) {
   return null;
 }
 
+const { findArduinoSketch, isArduinoProject } = require('./arduino');
+
 function makeTargetOverrideArgs(projectDir) {
   let txt;
   try { txt = fs.readFileSync(path.join(projectDir, 'Makefile'), 'utf8'); } catch { return []; }
@@ -68,6 +70,7 @@ function makeTargetOverrideArgs(projectDir) {
 
 function detectBuildSystem(projectDir, cfg, keilProj) {
   const mode = (cfg && cfg.buildSystem) || 'auto';
+  if (mode === 'arduino') return 'arduino';
   if (mode === 'make') {
     // 设置固定为 make 但目录无 Makefile 且识别到 Keil 工程时，自动切换到 Keil 编译
     if (KEIL_SUPPORTED && !fs.existsSync(path.join(projectDir, 'Makefile'))
@@ -78,19 +81,28 @@ function detectBuildSystem(projectDir, cfg, keilProj) {
     return 'make';
   }
   if (mode === 'keil') return KEIL_SUPPORTED ? 'keil' : 'make';
-  // auto：Keil 工程优先；否则有 Makefile 走 make；都没有默认 make
+  // auto：Keil 优先 → Arduino(.ino) → Makefile → 默认 make
   if (KEIL_SUPPORTED && (keilProj !== undefined ? keilProj : findKeilProject(projectDir))) return 'keil';
+  if (isArduinoProject(projectDir)) return 'arduino';
   if (fs.existsSync(path.join(projectDir, 'Makefile'))) return 'make';
   return 'make';
 }
 
 function resolveFirmware(projectDir, cfg) {
+  // Arduino 产物优先
+  try {
+    const { resolveArduinoFirmware } = require('./arduino');
+    const arduinoFw = resolveArduinoFirmware(projectDir, cfg);
+    if (arduinoFw) return arduinoFw;
+  } catch {
+    /* ignore */
+  }
   const buildDir = path.join(projectDir, 'build');
   if (cfg.elfName) {
     const p = path.join(buildDir, cfg.elfName);
     if (fs.existsSync(p)) return p;
   }
-  const exts = ['.elf', '.axf', '.hex'];
+  const exts = ['.elf', '.axf', '.hex', '.bin'];
   // 1) 优先 build/ 目录
   if (fs.existsSync(buildDir)) {
     const cands = fs.readdirSync(buildDir).filter((f) => exts.includes(path.extname(f).toLowerCase()));
@@ -98,6 +110,7 @@ function resolveFirmware(projectDir, cfg) {
       const preferred = cands.find((f) => f === 'classroom_ctrl.elf')
         || cands.find((f) => path.extname(f).toLowerCase() === '.elf')
         || cands.find((f) => path.extname(f).toLowerCase() === '.axf')
+        || cands.find((f) => path.extname(f).toLowerCase() === '.hex')
         || cands[0];
       return path.join(buildDir, preferred);
     }
@@ -173,5 +186,7 @@ module.exports = {
   makeTargetOverrideArgs,
   detectBuildSystem,
   resolveFirmware,
-  generateMakefile
+  generateMakefile,
+  findArduinoSketch: (...a) => require('./arduino').findArduinoSketch(...a),
+  isArduinoProject: (...a) => require('./arduino').isArduinoProject(...a)
 };

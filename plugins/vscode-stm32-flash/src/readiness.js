@@ -9,7 +9,9 @@ const {
   resolveOpenocdPath,
   findExecutableOnPath,
   effectivePaths,
-  checkProbeInfo
+  checkProbeInfo,
+  arduinoCliStatus,
+  isArduinoProject
 } = require('../vendor/flash-core');
 
 function existsFile(p) {
@@ -55,14 +57,29 @@ async function checkReadiness(cfg, projectDir) {
     : (c.buildSystem === 'keil' ? 'keil' : 'make');
 
   const compiler = {
-    mode: buildSystem === 'keil' ? 'keil' : 'make',
-    label: buildSystem === 'keil' ? 'Keil UV4' : 'Make / ARM GCC',
+    mode: buildSystem === 'keil' ? 'keil' : (buildSystem === 'arduino' ? 'arduino' : 'make'),
+    label: buildSystem === 'keil' ? 'Keil UV4' : (buildSystem === 'arduino' ? 'Arduino CLI' : 'Make / ARM GCC'),
     ok: false,
     detail: '',
     path: ''
   };
 
-  if (compiler.mode === 'keil') {
+  if (compiler.mode === 'arduino') {
+    try {
+      const st = await arduinoCliStatus(c);
+      compiler.path = (st && st.command) || '';
+      if (st && st.ok) {
+        compiler.ok = true;
+        compiler.detail = st.version || 'arduino-cli 就绪';
+      } else {
+        compiler.ok = false;
+        compiler.detail = (st && st.error) || '未找到 arduino-cli';
+      }
+    } catch (e) {
+      compiler.ok = false;
+      compiler.detail = e.message || 'arduino-cli 检测失败';
+    }
+  } else if (compiler.mode === 'keil') {
     if (process.platform !== 'win32') {
       compiler.ok = false;
       compiler.detail = 'Keil 仅 Windows 可用';
@@ -105,7 +122,10 @@ async function checkReadiness(cfg, projectDir) {
 
   const flasher = {
     mode: flashMethod,
-    label: flashMethod === 'openocd' ? 'OpenOCD' : flashMethod === 'keil' ? 'Keil UV4' : 'pyOCD',
+    label: flashMethod === 'openocd' ? 'OpenOCD'
+      : flashMethod === 'keil' ? 'Keil UV4'
+      : flashMethod === 'arduino' ? 'Arduino CLI'
+      : (buildSystem === 'arduino' && (flashMethod === 'auto' || flashMethod === 'pyocd') ? 'Arduino CLI' : 'pyOCD'),
     ok: false,
     online: false,
     detail: '',
@@ -113,7 +133,32 @@ async function checkReadiness(cfg, projectDir) {
     probes: []
   };
 
-  if (flashMethod === 'keil') {
+  const useArduinoUpload = flashMethod === 'arduino'
+    || (buildSystem === 'arduino' && (flashMethod === 'auto' || !flashMethod || flashMethod === 'pyocd'));
+
+  if (useArduinoUpload) {
+    flasher.mode = 'arduino';
+    flasher.label = 'Arduino CLI';
+    try {
+      const st = await arduinoCliStatus(c);
+      flasher.path = (st && st.command) || '';
+      if (!(st && st.ok)) {
+        flasher.detail = (st && st.error) || '未找到 arduino-cli';
+      } else {
+        flasher.ok = true;
+        const port = String(c.arduinoPort || c.portPath || '').trim();
+        if (port) {
+          flasher.online = true;
+          flasher.detail = `arduino-cli 就绪 · 串口 ${port}`;
+        } else {
+          flasher.online = false;
+          flasher.detail = 'arduino-cli 就绪，但未配置 arduinoPort 串口';
+        }
+      }
+    } catch (e) {
+      flasher.detail = e.message || 'arduino-cli 检测失败';
+    }
+  } else if (flashMethod === 'keil') {
     if (process.platform !== 'win32') {
       flasher.detail = 'Keil 烧录仅 Windows 可用';
     } else {
@@ -176,20 +221,25 @@ async function checkReadiness(cfg, projectDir) {
     }
   }
 
-  // 综合：编译工具就绪 + 烧录工具就绪；设备在线单独字段
   const readyForBuild = !!compiler.ok;
-  const readyForFlash = !!flasher.ok && (flashMethod === 'keil' ? true : !!flasher.online);
-  const readyForBuildAndFlash = readyForBuild && readyForFlash;
+  const readyForFlash = !!flasher.ok && (
+    flasher.mode === 'keil' || flasher.mode === 'arduino' ? !!flasher.online || flasher.mode === 'keil' : !!flasher.online
+  );
+  // Arduino: 有串口才 online；Keil 工具在即可
+  const readyForFlashFinal = flasher.mode === 'arduino'
+    ? (!!flasher.ok && !!flasher.online)
+    : (flasher.mode === 'keil' ? !!flasher.ok : (!!flasher.ok && !!flasher.online));
+  const readyForBuildAndFlash = readyForBuild && readyForFlashFinal;
 
   return {
     compiler,
     flasher,
     readyForBuild,
-    readyForFlash,
+    readyForFlash: readyForFlashFinal,
     readyForBuildAndFlash,
     summary: [
       compiler.ok ? `编译器 ✓ ${compiler.label}` : `编译器 ✗ ${compiler.detail}`,
-      flasher.online || (flashMethod === 'keil' && flasher.ok)
+      flasher.online || (flasher.mode === 'keil' && flasher.ok)
         ? `设备 ✓ ${flasher.detail}`
         : flasher.ok
           ? `设备 ✗ ${flasher.detail}`

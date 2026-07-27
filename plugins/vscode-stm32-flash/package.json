@@ -1,8 +1,8 @@
 {
   "name": "mcu-assistant",
   "displayName": "MCU-Assistant",
-  "description": "MCU 助手 · STM32 编译与烧录（Makefile / Keil / pyOCD / OpenOCD）",
-  "version": "0.1.10",
+  "description": "MCU-Assistant · STM32/Arduino 编译烧录 + ESP32 一键烧录",
+  "version": "0.1.14",
   "publisher": "leisureman",
   "engines": {
     "vscode": "^1.85.0"
@@ -11,18 +11,22 @@
     "Other"
   ],
   "activationEvents": [
-    "onView:stm32Flash.sidebar",
-    "onCommand:stm32Flash.selectProject",
-    "onCommand:stm32Flash.openRecent",
+    "onCommand:esp32.erase",
+    "onCommand:esp32.flash",
+    "onCommand:esp32.pickFirmware",
+    "onCommand:esp32.refreshPorts",
     "onCommand:stm32Flash.build",
-    "onCommand:stm32Flash.flash",
     "onCommand:stm32Flash.buildAndFlash",
-    "onCommand:stm32Flash.generateMakefile",
-    "onCommand:stm32Flash.checkProbe",
-    "onCommand:stm32Flash.readChipInfo",
     "onCommand:stm32Flash.cancel",
+    "onCommand:stm32Flash.checkProbe",
+    "onCommand:stm32Flash.flash",
+    "onCommand:stm32Flash.generateMakefile",
     "onCommand:stm32Flash.openOutput",
-    "onCommand:stm32Flash.openSettings"
+    "onCommand:stm32Flash.openRecent",
+    "onCommand:stm32Flash.openSettings",
+    "onCommand:stm32Flash.readChipInfo",
+    "onCommand:stm32Flash.selectProject",
+    "onView:stm32Flash.sidebar"
   ],
   "main": "./src/extension.js",
   "contributes": {
@@ -79,13 +83,38 @@
       },
       {
         "command": "stm32Flash.openOutput",
-        "title": "STM32: 打开日志",
-        "category": "STM32 Flash"
+        "title": "MCU-Assistant: 打开日志",
+        "category": "STM32 Flash",
+        "icon": "$(output)"
       },
       {
         "command": "stm32Flash.openSettings",
         "title": "STM32: 打开设置",
         "category": "STM32 Flash"
+      },
+      {
+        "command": "esp32.flash",
+        "title": "ESP32: 一键烧录",
+        "category": "ESP32 Flash",
+        "icon": "$(run-all)"
+      },
+      {
+        "command": "esp32.erase",
+        "title": "ESP32: 全片擦除",
+        "category": "ESP32 Flash",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "esp32.refreshPorts",
+        "title": "ESP32: 刷新串口",
+        "category": "ESP32 Flash",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "esp32.pickFirmware",
+        "title": "ESP32: 选择固件",
+        "category": "ESP32 Flash",
+        "icon": "$(file-binary)"
       }
     ],
     "viewsContainers": {
@@ -109,14 +138,9 @@
     "menus": {
       "view/title": [
         {
-          "command": "stm32Flash.buildAndFlash",
-          "when": "view == stm32Flash.sidebar",
-          "group": "navigation@1"
-        },
-        {
           "command": "stm32Flash.openOutput",
           "when": "view == stm32Flash.sidebar",
-          "group": "navigation@2"
+          "group": "navigation@1"
         }
       ]
     },
@@ -136,22 +160,25 @@
         "stm32Flash.flashMethod": {
           "type": "string",
           "enum": [
+            "auto",
             "pyocd",
             "openocd",
-            "keil"
+            "keil",
+            "arduino"
           ],
-          "default": "pyocd",
-          "description": "烧录方式"
+          "default": "auto",
+          "description": "烧录方式：auto=按工程类型自动（Arduino 走 arduino-cli）；也可强制 pyOCD/OpenOCD/Keil/Arduino"
         },
         "stm32Flash.buildSystem": {
           "type": "string",
           "enum": [
             "auto",
             "make",
-            "keil"
+            "keil",
+            "arduino"
           ],
           "default": "auto",
-          "description": "编译方式"
+          "description": "编译方式：auto=按工程识别；make/keil/arduino"
         },
         "stm32Flash.autoDetectChip": {
           "type": "boolean",
@@ -226,6 +253,26 @@
           ],
           "default": "default",
           "description": "default=优先共用目录内已安装工具链；custom=优先使用上方自定义路径。未配置时回退 MCU 工具箱设置"
+        },
+        "stm32Flash.arduinoCliPath": {
+          "type": "string",
+          "default": "",
+          "description": "arduino-cli 路径（空=PATH 自动查找）"
+        },
+        "stm32Flash.arduinoFqbn": {
+          "type": "string",
+          "default": "arduino:avr:uno",
+          "description": "Arduino FQBN，如 arduino:avr:uno / esp32:esp32:esp32 / arduino:samd:mkrzero"
+        },
+        "stm32Flash.arduinoPort": {
+          "type": "string",
+          "default": "",
+          "description": "Arduino 上传串口（如 /dev/cu.usbmodem14101 或 COM3）；空则尝试桌面端 ESP32 串口配置"
+        },
+        "stm32Flash.arduinoBoard": {
+          "type": "string",
+          "default": "arduino:avr:uno",
+          "description": "兼容字段，等同 arduinoFqbn"
         }
       }
     }

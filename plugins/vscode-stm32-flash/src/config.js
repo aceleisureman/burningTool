@@ -78,6 +78,11 @@ function loadFlashConfig() {
     ghProxy: stringSetting('ghProxy', d.ghProxy, ''),
     // 与桌面端共用已下载工具链时默认 default
     toolchainMode: stringSetting('toolchainMode', d.toolchainMode, 'default'),
+    // Arduino (arduino-cli)
+    arduinoCliPath: expandHome(stringSetting('arduinoCliPath', d.arduinoCliPath, '')),
+    arduinoFqbn: stringSetting('arduinoFqbn', d.arduinoFqbn || d.arduinoBoard, 'arduino:avr:uno'),
+    arduinoPort: stringSetting('arduinoPort', d.arduinoPort, ''),
+    arduinoBoard: stringSetting('arduinoBoard', d.arduinoBoard, 'arduino:avr:uno'),
     platformPaths: (desktop && desktop.platformPaths) || {},
     // 扩展侧元信息（core 忽略多余字段）
     _shared: {
