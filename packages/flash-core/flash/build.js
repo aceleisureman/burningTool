@@ -18,6 +18,10 @@ const { detectBuildSystem, makeTargetOverrideArgs, findKeilProject } = require('
 
 async function compile(projectDir, cfg) {
   const sys = detectBuildSystem(projectDir, cfg);
+  if (sys === 'keil' && cfg && cfg.buildSystem === 'make'
+      && !fs.existsSync(path.join(projectDir, 'Makefile'))) {
+    bus.send('[编译] 未找到 Makefile，但识别到 Keil 工程，自动切换为 Keil 编译方式', 'info');
+  }
   bus.send(`[编译] 目录: ${projectDir}`, 'step');
   bus.send(`[编译] 编译方式: ${sys === 'keil' ? 'Keil uVision5 (UV4)' : 'Makefile (GCC)'}`, 'info');
   return sys === 'keil' ? compileKeil(projectDir, cfg) : compileMake(projectDir, cfg);
@@ -95,7 +99,8 @@ async function runUV4(cfg, projectDir, op /* 'build' | 'flash' */) {
   }
   const logFile = path.join(getPathsContext().tempDir, `uv4_${op}_${Date.now()}.txt`);
   // -j0 隐藏对话框；-o 把输出写到日志文件（UV4 不走 stdout）
-  const cmdFlag = op === 'flash' ? '-f' : (cfg.keilRebuild ? '-z' : '-b');
+  // UV4: -b=增量 Build，-r=Rebuild。-z 不是 Rebuild，旧版 UV4 会无日志挂起。
+  const cmdFlag = op === 'flash' ? '-f' : (cfg.keilRebuild ? '-r' : '-b');
   const args = [cmdFlag, proj, '-j0', '-o', logFile];
   bus.send(`[${op === 'flash' ? '烧录' : '编译'}] UV4 ${cmdFlag} "${path.basename(proj)}" ...`, 'step');
   // UV4 只把输出写进 -o 日志文件，编译期间轮询该文件、把新增的完整行实时推送到前端
@@ -121,8 +126,31 @@ async function runUV4(cfg, projectDir, op /* 'build' | 'flash' */) {
     const psq = (s) => `'${String(s).replace(/'/g, "''")}'`;
     // Start-Process 拼接 ArgumentList 时不会自动加引号，含空格的路径参数需自带双引号
     const psArg = (s) => psq(/\s/.test(String(s)) ? `"${s}"` : s);
-    const psCmd = `$p = Start-Process -FilePath ${psq(uv4)} -ArgumentList @(${args.map(psArg).join(', ')}) `
-      + `-WorkingDirectory ${psq(path.dirname(proj))} -WindowStyle Hidden -Wait -PassThru; exit $p.ExitCode`;
+    // 部分老版本 UV4 完成构建并写出最终日志后仍不退出，单纯 -Wait 会永久挂住。
+    // 轮询日志的最终 “N Error(s)” 标记；确认完成后只结束本次无窗口 UV4 进程。
+    const psCmd = `
+      $p = Start-Process -FilePath ${psq(uv4)} -ArgumentList @(${args.map(psArg).join(', ')}) -WorkingDirectory ${psq(path.dirname(proj))} -WindowStyle Hidden -PassThru
+      $deadline = [DateTime]::UtcNow.AddMinutes(10)
+      while (-not $p.HasExited -and [DateTime]::UtcNow -lt $deadline) {
+        if (Test-Path -LiteralPath ${psq(logFile)}) {
+          try {
+            $txt = [IO.File]::ReadAllText(${psq(logFile)})
+            if ($txt -match '(?im)^.*?\\d+\\s+Error\\(s\\).*?$') {
+              try { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } catch {}
+              if ($txt -match '(?im)^.*?0\\s+Error\\(s\\).*?$') { exit 0 }
+              exit 2
+            }
+          } catch {}
+        }
+        Start-Sleep -Milliseconds 200
+        try { $p.Refresh() } catch {}
+      }
+      if (-not $p.HasExited) {
+        try { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } catch {}
+        exit 124
+      }
+      exit $p.ExitCode
+    `;
     code = await runProcess('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', psCmd],
       { cwd: path.dirname(proj), shell: false, windowsHide: true });
   } finally {

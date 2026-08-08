@@ -72,7 +72,6 @@ function detectBuildSystem(projectDir, cfg, keilProj) {
     // 设置固定为 make 但目录无 Makefile 且识别到 Keil 工程时，自动切换到 Keil 编译
     if (KEIL_SUPPORTED && !fs.existsSync(path.join(projectDir, 'Makefile'))
         && (keilProj !== undefined ? keilProj : findKeilProject(projectDir))) {
-      bus.send('[编译] 未找到 Makefile，但识别到 Keil 工程，自动切换为 Keil 编译方式', 'info');
       return 'keil';
     }
     return 'make';

@@ -2,10 +2,31 @@
 const os = require('os');
 const path = require('path');
 const fs = require('fs');
+const { execFileSync } = require('child_process');
 const { PLATFORM_TC, loadConfig } = require('../core/env');
 const bus = require('../core/bus');
 const { getPathsContext } = require('../core/paths-context');
 const { runProcess } = require('./proc');
+
+/**
+ * 用系统命令查找可执行文件（避免 PATH 含网络路径时 fs.existsSync 阻塞）
+ * @param {string} name - 可执行文件名
+ * @param {number} timeoutMs - 超时毫秒（默认 4000）
+ * @returns {string|null} 找到的完整路径，否则 null
+ */
+function whichSync(name, timeoutMs = 4000) {
+  const cmd = process.platform === 'win32' ? 'where.exe' : 'which';
+  try {
+    const out = execFileSync(cmd, [name], {
+      encoding: 'utf8',
+      timeout: timeoutMs,
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
+    const first = (out || '').split(/\r?\n/).find((l) => l.trim());
+    if (first) return first.trim();
+  } catch { /* not found or timeout */ }
+  return null;
+}
 
 function toolsDir() {
   const ctx = getPathsContext();
@@ -292,7 +313,7 @@ function resolvePyocdPath(cfg) {
     pyocd,
     expandHomePath(PLATFORM_TC.placeholders.pyocdPath),
     ...posixFallbacks,
-    findExecutableOnPath(isWin ? 'pyocd.exe' : 'pyocd')
+    whichSync(isWin ? 'pyocd.exe' : 'pyocd') || ''
   ].filter(Boolean);
 
   for (const p of candidates) {
@@ -321,7 +342,7 @@ function resolveOpenocdPath(cfg) {
     openocd,
     expandHomePath(PLATFORM_TC.placeholders.openocdPath),
     ...posixFallbacks,
-    findExecutableOnPath(isWin ? 'openocd.exe' : 'openocd')
+    whichSync(isWin ? 'openocd.exe' : 'openocd') || ''
   ].filter(Boolean);
   for (const p of candidates) {
     if (!looksLikePath(p) || fs.existsSync(p)) return { openocd: p, switched: switchedAway && p !== original };
