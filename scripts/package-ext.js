@@ -17,12 +17,14 @@ const root = path.resolve(__dirname, '..');
 const extDir = path.join(root, 'plugins', 'vscode-stm32-flash');
 const pkgPath = path.join(extDir, 'package.json');
 
-function run(cmd, args, cwd) {
-  const r = spawnSync(cmd, args, {
-    cwd,
-    stdio: 'inherit',
-    shell: process.platform === 'win32'
-  });
+function run(cmd, args, cwd, shell = false) {
+  // 默认不用 shell，由 spawnSync 直接处理带空格的路径（如 C:\Program Files、burning tool）；
+  // Windows 上 .cmd 批处理（如 npx）必须走 shell（Node 安全策略），其参数不含空格，无注入风险
+  const r = spawnSync(cmd, args, { cwd, stdio: 'inherit', shell });
+  if (r.error) {
+    console.error(`[ext:package] 启动失败: ${cmd} — ${r.error.message}`);
+    process.exit(1);
+  }
   if (r.status !== 0) process.exit(r.status || 1);
 }
 
@@ -104,7 +106,8 @@ function main() {
   run(
     'npx',
     ['--yes', '@vscode/vsce', 'package', '--no-dependencies', '--allow-missing-repository'],
-    extDir
+    extDir,
+    process.platform === 'win32'
   );
 
   const outName = `mcu-assistant-${kind === 'none' ? oldVersion : newVersion}.vsix`;
