@@ -2,20 +2,14 @@
 
 const vscode = require('vscode');
 const { EventEmitter } = require('events');
-const {
-  jobLock,
-  compile,
-  flash,
-  generateMakefile,
-  checkProbeInfo,
-  readChipInfo
-} = require('../vendor/flash-core');
+const { jobLock, checkProbeInfo, readChipInfo } = require('../vendor/flash-core');
 const {
   listRecentProjectInfos,
   addRecentProject,
   removeRecentProject
 } = require('./recentStore');
-const { checkReadiness } = require('./readiness');
+const { getPlatform } = require('./platforms/index');
+const { t, locale } = require('./i18n');
 
 /**
  * @param {object} deps
@@ -34,7 +28,6 @@ function createFlashService(deps) {
   } = deps;
 
   const emitter = new EventEmitter();
-  /** @type {any} */
   let state = {
     busy: false,
     job: '',
@@ -70,7 +63,10 @@ function createFlashService(deps) {
       hasWorkspace: !!(vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length),
       toolchainRoot: shared.toolchainRoot || cfg.toolchainRootPath || '',
       hasToolchain: !!shared.hasToolchain,
-      hasDesktopConfig: !!shared.hasDesktopConfig
+      hasDesktopConfig: !!shared.hasDesktopConfig,
+      locale: locale(),
+      // PlatformIO IDE 扩展是否已安装
+      hasPioExtension: !!(vscode.extensions.getExtension('platformio.platformio-ide'))
     };
   }
 
@@ -86,19 +82,18 @@ function createFlashService(deps) {
       try {
         const cfg = getConfig();
         const dir = getProjectDir();
-        const readiness = await checkReadiness(cfg, dir);
+        const platform = getPlatform(cfg.projectMode || 'stm32cube');
+        const readiness = await platform.checkReadiness(cfg, dir);
         state.readiness = readiness;
         state.checking = false;
         emitState();
         return readiness;
       } catch (e) {
         state.readiness = {
-          compiler: { ok: false, label: '编译器', detail: e.message || '检查失败' },
-          flasher: { ok: false, online: false, label: '烧录设备', detail: e.message || '检查失败' },
-          readyForBuild: false,
-          readyForFlash: false,
-          readyForBuildAndFlash: false,
-          summary: e.message || '就绪检查失败'
+          compiler: { ok: false, label: t('readiness.compiler'), detail: e.message || t('check.fail') },
+          flasher:  { ok: false, online: false, label: t('readiness.device'), detail: e.message || t('check.fail') },
+          readyForBuild: false, readyForFlash: false, readyForBuildAndFlash: false,
+          summary: e.message || t('check.fail')
         };
         state.checking = false;
         emitState();
@@ -115,14 +110,12 @@ function createFlashService(deps) {
     const project = buildProjectState();
     state = {
       ...state,
-      project,
-      cfg,
+      project, cfg,
       recent: listRecentProjectInfos(),
       busy: jobLock.isBusy(),
       job: (jobLock.getJobState().job && jobLock.getJobState().job.name) || state.job
     };
     emitState();
-    // 异步刷新编译器/设备在线状态（不阻塞 UI）
     refreshReadiness(false).catch(() => {});
     return snapshot();
   }
@@ -133,25 +126,18 @@ function createFlashService(deps) {
       addRecentProject(dir);
       state.recent = listRecentProjectInfos();
     } catch (e) {
-      output.append(`[系统] 历史记录写入失败: ${e.message || e}`, 'warn');
+      output.append(t('sys.recent_write_fail', e.message || e), 'warn');
     }
   }
 
-  /**
-   * 确保有工程目录；无则弹窗提示选择。
-   * @returns {Promise<string|null>}
-   */
   async function requireProjectDir() {
     let dir = getProjectDir();
     if (dir) return dir;
-
-    output.append('[系统] 未打开工程，请选择工程目录', 'warn');
-    if (typeof ensureProjectDir === 'function') {
-      dir = await ensureProjectDir();
-    }
+    output.append(t('sys.no_project_warn'), 'warn');
+    if (typeof ensureProjectDir === 'function') dir = await ensureProjectDir();
     if (!dir) {
-      output.append('[系统] ✗ 请选择工程', 'error');
-      statusBar.setIdle('请选择工程');
+      output.append(t('sys.no_project_err'), 'error');
+      statusBar.setIdle(t('status.select'));
       state.lastResult = 'err';
       await refreshState();
       return null;
@@ -161,60 +147,66 @@ function createFlashService(deps) {
   }
 
   /**
-   * 操作前检查编译器 / 烧录设备是否就绪
+   * 操作前检查就绪（使用平台处理器）
    * @param {'build'|'flash'|'build-and-flash'} kind
    */
   async function ensureReady(kind) {
     const readiness = await refreshReadiness(true);
-    if (!readiness) return { ok: false, error: '就绪检查失败' };
+    if (!readiness) return { ok: false, error: t('check.fail') };
 
     if (kind === 'build' || kind === 'build-and-flash') {
       if (!readiness.readyForBuild) {
-        const detail = (readiness.compiler && readiness.compiler.detail) || '编译器未就绪';
-        output.append(`[检查] ✗ 编译器未就绪：${detail}`, 'error');
-        output.append('[检查] 请确认 make / arm-none-eabi-gcc（或 Keil UV4）已安装，并与当前编译方式匹配', 'info');
+        const detail = (readiness.compiler && readiness.compiler.detail) || t('check.compiler_not_ready');
+        output.append(t('check.compiler_fail', detail), 'error');
+        output.append(t('check.compiler_hint'), 'info');
         statusBar.setResult(false);
         return { ok: false, error: detail, readiness };
       }
-      output.append(`[检查] ✓ 编译器：${readiness.compiler.label} · ${readiness.compiler.detail}`, 'success');
+      output.append(t('check.compiler_ok', readiness.compiler.label, readiness.compiler.detail), 'success');
     }
 
     if (kind === 'flash' || kind === 'build-and-flash') {
       if (!(readiness.flasher && readiness.flasher.ok)) {
-        const detail = (readiness.flasher && readiness.flasher.detail) || '烧录工具未就绪';
-        output.append(`[检查] ✗ 烧录工具未就绪：${detail}`, 'error');
+        const detail = (readiness.flasher && readiness.flasher.detail) || t('check.flasher_not_ready');
+        output.append(t('check.flasher_fail', detail), 'error');
         statusBar.setResult(false);
         return { ok: false, error: detail, readiness };
       }
       if (!readiness.readyForFlash) {
-        const detail = (readiness.flasher && readiness.flasher.detail) || '烧录设备不在线';
-        output.append(`[检查] ✗ 烧录设备不在线：${detail}`, 'error');
-        output.append('[检查] 请插入 CMSIS-DAP/ST-Link 等调试器，确认 USB 数据线，并重新检测', 'info');
+        const detail = (readiness.flasher && readiness.flasher.detail) || t('check.device_not_online');
+        output.append(t('check.device_offline', detail), 'error');
+        output.append(t('check.device_hint'), 'info');
         statusBar.setResult(false);
         return { ok: false, error: detail, readiness };
       }
-      output.append(`[检查] ✓ 烧录设备：${readiness.flasher.label} · ${readiness.flasher.detail}`, 'success');
+      output.append(t('check.device_ok', readiness.flasher.label, readiness.flasher.detail), 'success');
     }
 
     return { ok: true, readiness };
   }
 
   /**
+   * 通用任务框架 — 所有平台共用，消除 ESP32 重复代码
    * @param {string} name
    * @param {string} busyLabel
-   * @param {(ctx: {dir: string, cfg: object}) => Promise<{ok: boolean, detail?: any}>} fn
-   * @param {{ preflight?: 'build'|'flash'|'build-and-flash' }} [opts]
+   * @param {(ctx) => Promise<{ok, error?, buildOk?, flashOk?}>} fn
+   * @param {{ preflight?: 'build'|'flash'|'build-and-flash', skipProjectCheck?: boolean }} opts
    */
   async function runJob(name, busyLabel, fn, opts = {}) {
-    const dir = await requireProjectDir();
     const cfg = getConfig();
-    if (!dir) {
-      return { ok: false, error: '请选择工程' };
+    const platform = getPlatform(cfg.projectMode || 'stm32cube');
+
+    // ESP32 模式不强制要求 projectValid（pio 本身管理工程）
+    const skipProjectCheck = opts.skipProjectCheck || platform.id === 'esp32';
+    const dir = skipProjectCheck ? (getProjectDir() || '') : await requireProjectDir();
+
+    if (!skipProjectCheck && !dir) {
+      return { ok: false, error: t('status.select') };
     }
 
     if (opts.preflight) {
       output.show(true);
-      output.append('═════════ 就绪检查 ═════════', 'step');
+      output.append(t('check.section'), 'step');
       const gate = await ensureReady(opts.preflight);
       if (!gate.ok) {
         state.lastResult = 'err';
@@ -230,16 +222,16 @@ function createFlashService(deps) {
     state.lastResult = null;
     emitState();
 
-    const locked = await jobLock.runExclusive(name, async () => fn({ dir, cfg }));
+    const locked = await jobLock.runExclusive(name, async () => fn({ dir, cfg, output, statusBar, t, platform }));
     if (locked.busy) {
-      output.append(`[任务] 忙碌中：${locked.error}`, 'warn');
-      statusBar.setBusy('忙碌');
+      output.append(t('task.busy', locked.error), 'warn');
+      statusBar.setBusy(t('status.busy'));
       state.busy = true;
       emitState();
       return { ok: false, busy: true, error: locked.error };
     }
 
-    const result = locked.result || { ok: false, error: locked.error || '任务失败' };
+    const result = locked.result || { ok: false, error: locked.error || t('task.fail') };
     state.busy = false;
     state.job = '';
     state.lastResult = result.ok ? 'ok' : 'err';
@@ -248,130 +240,106 @@ function createFlashService(deps) {
     return result;
   }
 
-  /**
-   * 选择/切换工程：写入历史（与 MCU 工具箱互通）+ 可选切换 VS Code 工作区
-   * @param {string} dir
-   * @param {{ openInVscode?: boolean }} [opts]
-   */
   async function selectProject(dir, opts = {}) {
     if (!dir) return null;
     const openInVscode = opts.openInVscode !== false;
     await setProjectDir(dir);
     touchRecent(dir);
-    output.append(`[系统] 已选择工程: ${dir}`, 'step');
+    output.append(t('sys.project_selected', dir), 'step');
     const info = detectProject(dir, getConfig());
-    if (!info.exists) output.append(`[系统] ⚠ 目录不存在: ${dir}`, 'error');
-    else if (!info.projectValid && info.hasIoc) {
-      output.append('[系统] 检测到 CubeMX 工程(.ioc) 但无 Makefile，可执行「生成 Makefile」', 'info');
-    } else if (!info.projectValid) {
-      output.append('[系统] ⚠ 未检测到 Makefile 或 Keil 工程', 'error');
-    }
+    if (!info.exists) output.append(t('sys.no_dir', dir), 'error');
+    else if (!info.projectValid && info.hasIoc) output.append(t('sys.has_ioc'), 'info');
+    else if (!info.projectValid) output.append(t('sys.no_makefile'), 'error');
 
     if (openInVscode && typeof openProjectInVscode === 'function' && info.exists) {
       const r = await openProjectInVscode(dir);
-      if (r.ok && r.same) {
-        output.append('[系统] 已是当前 VS Code 工作区', 'info');
-      } else if (r.ok) {
-        // openFolder 会重载窗口；后续日志可能看不到
-        output.append('[系统] 正在切换 VS Code 到该工程…', 'step');
-      } else {
-        output.append(`[系统] 切换 VS Code 工作区失败: ${r.error || 'unknown'}`, 'warn');
-      }
+      if (r.ok && r.same)        output.append(t('sys.vscode_same'), 'info');
+      else if (r.ok)             output.append(t('sys.vscode_switching'), 'step');
+      else output.append(t('sys.vscode_switch_fail', r.error || 'unknown'), 'warn');
     }
 
     await refreshState();
     return info;
   }
 
-  async function openRecent(dir) {
-    return selectProject(dir, { openInVscode: true });
-  }
+  async function openRecent(dir) { return selectProject(dir, { openInVscode: true }); }
 
   async function removeRecent(dir) {
     removeRecentProject(dir);
-    output.append(`[系统] 已从历史移除: ${dir}`, 'info');
+    output.append(t('sys.recent_removed', dir), 'info');
     await refreshState();
   }
 
+  // ── 核心操作：通过平台处理器执行，无 if/else ──────────────────────────────
+
   async function doBuild() {
-    return runJob('build', '编译中…', async ({ dir, cfg }) => {
-      touchRecent(dir);
-      output.append('═════════ 开始编译 ═════════', 'step');
-      output.append(`[系统] 工程: ${dir}`, 'info');
-      const ok = await compile(dir, cfg);
-      output.append(ok ? '[编译] 完成' : '[编译] 失败', ok ? 'success' : 'error');
-      return { ok: !!ok };
-    }, { preflight: 'build' });
+    return runJob('build', t('status.building'), async (ctx) => {
+      touchRecent(ctx.dir);
+      return ctx.platform.build(ctx);
+    }, { preflight: 'build', skipProjectCheck: false });
   }
 
   async function doFlash() {
-    return runJob('flash', '烧录中…', async ({ dir, cfg }) => {
-      touchRecent(dir);
-      output.append('═════════ 开始烧录 ═════════', 'step');
-      output.append(`[系统] 工程: ${dir}`, 'info');
-      const ok = await flash(dir, cfg);
-      output.append(ok ? '[烧录] 完成' : '[烧录] 失败', ok ? 'success' : 'error');
-      return { ok: !!ok };
+    return runJob('flash', t('status.flashing'), async (ctx) => {
+      touchRecent(ctx.dir);
+      return ctx.platform.flash(ctx);
     }, { preflight: 'flash' });
   }
 
   async function doBuildAndFlash() {
-    return runJob('build-and-flash', '编译烧录中…', async ({ dir, cfg }) => {
-      touchRecent(dir);
-      output.append('═════════ 一键编译烧录 ═════════', 'step');
-      output.append(`[系统] 工程: ${dir}`, 'info');
-      const buildOk = await compile(dir, cfg);
-      if (!buildOk) {
-        output.append('[一键] 编译失败，跳过烧录', 'error');
-        return { ok: false, buildOk: false, flashOk: false };
-      }
-      const flashOk = await flash(dir, cfg);
-      output.append(
-        flashOk ? '[一键] 编译烧录完成' : '[一键] 烧录失败',
-        flashOk ? 'success' : 'error'
-      );
-      return { ok: !!flashOk, buildOk: true, flashOk: !!flashOk };
+    return runJob('build-and-flash', t('status.building_flashing'), async (ctx) => {
+      touchRecent(ctx.dir);
+      return ctx.platform.buildAndFlash(ctx);
     }, { preflight: 'build-and-flash' });
   }
 
   async function doGenerateMakefile() {
-    return runJob('generate-makefile', '生成 Makefile…', async ({ dir, cfg }) => {
-      output.append('═════════ 生成 Makefile ═════════', 'step');
-      const r = await generateMakefile(dir, cfg);
+    return runJob('generate-makefile', t('status.generating'), async ({ dir, cfg: c }) => {
+      const { generateMakefile } = require('../vendor/flash-core');
+      output.append(t('makefile.section'), 'step');
+      const r = await generateMakefile(dir, c);
       const ok = !!(r && r.ok);
-      output.append(ok ? '[生成] 完成' : `[生成] 失败: ${(r && r.error) || ''}`, ok ? 'success' : 'error');
+      output.append(ok ? t('makefile.done') : t('makefile.fail', (r && r.error) || ''), ok ? 'success' : 'error');
       return { ok, detail: r };
     });
   }
 
   async function doCheckProbe() {
     output.show(true);
-    output.append('═════════ 检测烧录器 / 就绪状态 ═════════', 'step');
-    statusBar.setBusy('检测中…');
+    output.append(t('probe.section'), 'step');
+    statusBar.setBusy(t('status.checking'));
     try {
+      const cfg = getConfig();
+      const platform = getPlatform(cfg.projectMode || 'stm32cube');
       const readiness = await refreshReadiness(true);
-      const r = await checkProbeInfo(getConfig());
       if (readiness && readiness.compiler) {
         output.append(
           readiness.compiler.ok
-            ? `[编译器] ✓ ${readiness.compiler.label} · ${readiness.compiler.detail}`
-            : `[编译器] ✗ ${readiness.compiler.detail}`,
+            ? t('probe.compiler_ok', readiness.compiler.label, readiness.compiler.detail)
+            : t('probe.compiler_fail', readiness.compiler.detail),
           readiness.compiler.ok ? 'success' : 'error'
         );
       }
-      if (r && r.ok) {
-        const n = (r.probes && r.probes.length) || 0;
-        const name = (r.chosen && r.chosen.name) || (r.probes && r.probes[0] && r.probes[0].name) || '';
-        output.append(`[烧录器] ✓ 在线 ${n} 个${name ? ' · ' + name : ''}`, 'success');
-        statusBar.setResult(true);
+      // 平台支持 checkProbe 时执行
+      const r = platform.checkProbe ? await platform.checkProbe(cfg) : null;
+      if (r) {
+        if (r.ok) {
+          const n = (r.probes && r.probes.length) || 0;
+          const name = (r.chosen && r.chosen.name) || (r.probes && r.probes[0] && r.probes[0].name) || '';
+          output.append(t('probe.online', n, name ? ' · ' + name : ''), 'success');
+          statusBar.setResult(true);
+        } else {
+          output.append(t('probe.fail', (r && r.error) || t('probe.none')), 'error');
+          statusBar.setResult(false);
+        }
       } else {
-        output.append(`[烧录器] ✗ ${(r && r.error) || '未检测到烧录器'}`, 'error');
-        statusBar.setResult(false);
+        output.append('[检测] 当前模式不支持探针检测', 'info');
+        statusBar.setResult(true);
       }
       await refreshState();
       return r;
     } catch (e) {
-      output.append(`[异常] ${e.message}`, 'error');
+      output.append(t('err.exception', e.message), 'error');
       statusBar.setResult(false);
       return { ok: false, error: e.message };
     }
@@ -379,15 +347,18 @@ function createFlashService(deps) {
 
   async function doReadChipInfo() {
     output.show(true);
-    output.append('═════════ 读取芯片信息 ═════════', 'step');
-    statusBar.setBusy('读芯片…');
+    output.append(t('chip.section'), 'step');
+    statusBar.setBusy(t('status.reading_chip'));
     try {
-      const r = await readChipInfo(getConfig());
+      const cfg = getConfig();
+      const platform = getPlatform(cfg.projectMode || 'stm32cube');
+      const r = platform.readChipInfo ? await platform.readChipInfo(cfg) : null;
+      if (!r) output.append('[芯片] 当前模式不支持芯片信息读取', 'info');
       statusBar.setResult(!!(r && r.ok !== false));
       await refreshState();
       return r;
     } catch (e) {
-      output.append(`[异常] ${e.message}`, 'error');
+      output.append(t('err.exception', e.message), 'error');
       statusBar.setResult(false);
       return { ok: false, error: e.message };
     }
@@ -395,8 +366,8 @@ function createFlashService(deps) {
 
   function cancel() {
     const r = jobLock.cancelJob('user-cancel');
-    if (r && r.ok) output.append('[任务] 已请求取消', 'warn');
-    else output.append(`[任务] ${r && r.error ? r.error : '无法取消'}`, 'warn');
+    if (r && r.ok) output.append(t('task.cancel_ok'), 'warn');
+    else output.append(t('task.cancel_none', (r && r.error) ? r.error : t('task.cancel_fail')), 'warn');
     return r;
   }
 
@@ -410,9 +381,7 @@ function createFlashService(deps) {
     selectProject,
     openRecent,
     removeRecent,
-    doBuild,
-    doFlash,
-    doBuildAndFlash,
+    doBuild, doFlash, doBuildAndFlash,
     doGenerateMakefile,
     doCheckProbe,
     doReadChipInfo,

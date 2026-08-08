@@ -9,65 +9,62 @@ const {
   detectBuildSystem
 } = require('../vendor/flash-core');
 const { loadFlashConfig, getConfiguredProjectDir, setProjectDir } = require('./config');
+const { getPlatform } = require('./platforms/index');
 
 /**
  * @param {string} dir
+ * @param {object} [cfg]
  */
 function detectProject(dir, cfg) {
   if (!dir || !fs.existsSync(dir)) {
     return {
-      exists: false,
-      dir: dir || '',
-      hasMakefile: false,
-      hasKeil: false,
-      keilProject: '',
-      hasIoc: false,
-      iocFile: '',
-      buildSystem: null,
-      projectValid: false,
-      projectKind: 'none',
-      projectKindLabel: '未选择工程',
-      source: ''
+      exists: false, dir: dir || '',
+      hasMakefile: false, hasKeil: false, keilProject: '',
+      hasIoc: false, iocFile: '',
+      buildSystem: null, projectValid: false,
+      projectKind: 'none', projectKindLabel: '未选择工程',
+      source: '',
+      hasPlatformIO: false, hasArduino: false, hasEspIdf: false,
+      hasMicroPython: false, esp32SubKind: 'unknown'
     };
   }
+
   const hasMakefile = fs.existsSync(path.join(dir, 'Makefile'));
   const keilProj = findKeilProject(dir);
-  const iocFile = findIocFile(dir);
-  const hasKeil = !!keilProj;
-  const hasIoc = !!iocFile;
+  const iocFile  = findIocFile(dir);
+  const hasKeil  = !!keilProj;
+  const hasIoc   = !!iocFile;
   const buildSystem = detectBuildSystem(dir, cfg || loadFlashConfig(), keilProj);
+
+  // 委托各平台处理器做特征检测
+  const esp32Extra = getPlatform('esp32').detect(dir);
 
   let projectKind = 'unknown';
   let projectKindLabel = '未识别工程';
-  if (hasMakefile && hasKeil) {
-    projectKind = 'makefile+keil';
-    projectKindLabel = 'Keil + Makefile 混合工程';
-  } else if (hasKeil) {
-    projectKind = 'keil';
-    projectKindLabel = 'Keil 工程';
-  } else if (hasMakefile) {
-    projectKind = 'makefile';
-    projectKindLabel = 'Makefile / GCC 工程';
-  } else if (hasIoc) {
-    projectKind = 'cubemx';
-    projectKindLabel = 'CubeMX 工程（需生成 Makefile）';
-  }
+  if (hasMakefile && hasKeil)          { projectKind = 'makefile+keil';       projectKindLabel = 'Keil + Makefile 混合工程'; }
+  else if (hasKeil)                    { projectKind = 'keil';                 projectKindLabel = 'Keil 工程'; }
+  else if (hasMakefile)                { projectKind = 'makefile';             projectKindLabel = 'Makefile / GCC 工程'; }
+  else if (hasIoc)                     { projectKind = 'cubemx';               projectKindLabel = 'CubeMX 工程（需生成 Makefile）'; }
+  else if (esp32Extra.hasPlatformIO)   { projectKind = 'esp32-platformio';     projectKindLabel = 'ESP32 PlatformIO 工程'; }
+  else if (esp32Extra.hasEspIdf)       { projectKind = 'esp32-idf';            projectKindLabel = 'ESP32 ESP-IDF 工程'; }
+  else if (esp32Extra.hasArduino)      { projectKind = 'esp32-arduino';        projectKindLabel = 'ESP32 Arduino 工程'; }
+  else if (esp32Extra.hasMicroPython)  { projectKind = 'esp32-micropython';    projectKindLabel = 'ESP32 MicroPython 工程'; }
 
   return {
-    exists: true,
-    dir,
-    hasMakefile,
-    hasKeil,
+    exists: true, dir,
+    hasMakefile, hasKeil,
     keilProject: keilProj ? path.relative(dir, keilProj) || path.basename(keilProj) : '',
     hasIoc,
     iocFile: iocFile ? path.relative(dir, iocFile) || path.basename(iocFile) : '',
     buildSystem,
-    projectValid: !!(hasMakefile || keilProj),
-    projectKind,
-    projectKindLabel,
-    source: ''
+    projectValid: !!(hasMakefile || keilProj || esp32Extra.hasPlatformIO || esp32Extra.hasEspIdf || esp32Extra.hasArduino),
+    projectKind, projectKindLabel,
+    source: '',
+    ...esp32Extra
   };
 }
+
+
 
 /**
  * 当前 VS Code 已打开的工作区根目录。
