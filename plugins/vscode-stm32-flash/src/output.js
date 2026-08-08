@@ -29,6 +29,8 @@ function createOutput() {
       progressLines.set(key, Date.now());
     }
     channel.appendLine(`${formatTime()} ${mark} ${line}`);
+    // 每次 append 后自动滚到底（preserveFocus=true 不抢焦点）
+    channel.show(true);
   }
 
   return {

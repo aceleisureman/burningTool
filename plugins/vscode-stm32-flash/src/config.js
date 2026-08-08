@@ -78,6 +78,10 @@ function loadFlashConfig() {
     ghProxy: stringSetting('ghProxy', d.ghProxy, ''),
     // 与桌面端共用已下载工具链时默认 default
     toolchainMode: stringSetting('toolchainMode', d.toolchainMode, 'default'),
+    // 工程模式：stm32cube / keil5 / esp32
+    projectMode: stringSetting('projectMode', null, 'stm32cube'),
+    // ESP32 子模式：platformio / arduino / idf / micropython
+    esp32SubMode: stringSetting('esp32SubMode', null, 'platformio'),
     platformPaths: (desktop && desktop.platformPaths) || {},
     // 扩展侧元信息（core 忽略多余字段）
     _shared: {

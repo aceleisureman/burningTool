@@ -3,6 +3,7 @@
 const vscode = require('vscode');
 const { updateSetting } = require('./config');
 const { listRecentProjectInfos } = require('./recentStore');
+const { t } = require('./i18n');
 
 /**
  * @param {vscode.ExtensionContext} context
@@ -27,28 +28,28 @@ function registerCommands(context, deps) {
     ['stm32Flash.openRecent', async () => {
       const items = listRecentProjectInfos().map((r) => ({
         label: r.name,
-        description: r.exists ? r.parent : '目录不存在',
+        description: r.exists ? r.parent : t('recent.dir_missing', r.dir),
         detail: r.dir,
         dir: r.dir,
         exists: r.exists
       }));
       if (!items.length) {
-        vscode.window.showInformationMessage('暂无历史工程（与 MCU 工具箱共用）');
+        vscode.window.showInformationMessage(t('recent.empty'));
         return;
       }
       const picked = await vscode.window.showQuickPick(items, {
-        title: '历史工程（MCU 工具箱互通）',
-        placeHolder: '选择后将切换 VS Code 到该工程',
+        title: t('recent.title'),
+        placeHolder: t('recent.placeholder'),
         matchOnDescription: true,
         matchOnDetail: true
       });
       if (!picked) return;
       if (!picked.exists) {
         const act = await vscode.window.showWarningMessage(
-          `目录不存在：${picked.dir}`,
-          '从历史移除'
+          t('recent.dir_missing', picked.dir),
+          t('recent.remove_action')
         );
-        if (act === '从历史移除') await service.removeRecent(picked.dir);
+        if (act === t('recent.remove_action')) await service.removeRecent(picked.dir);
         provider.refresh();
         return;
       }

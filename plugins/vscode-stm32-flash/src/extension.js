@@ -10,6 +10,7 @@ const {
 
 const { createOutput } = require('./output');
 const { createStatusBar } = require('./statusBar');
+const { t } = require('./i18n');
 const { loadFlashConfig, setProjectDir, onConfigChange } = require('./config');
 const { createFlashService } = require('./flashService');
 const {
@@ -29,6 +30,8 @@ const { resolveSharedRoots, platformHint, platformId } = require('./toolchainSha
  * @param {vscode.ExtensionContext} context
  */
 function activate(context) {
+  const extVersion = context.extension.packageJSON.version || '0.0.0';
+
   // 与桌面端 MCU 工具箱共用 userData/toolchain/tools（按系统解析）
   const applySharedPaths = () => {
     const cfg = loadFlashConfig();
@@ -57,7 +60,7 @@ function activate(context) {
   bus.setSinks({
     send: (text, type) => output.append(text, type || 'info'),
     sendProgress: (key, text) => output.append(text, 'progress', key),
-    sendDownloadProgress: (label, percent) => output.append(`[下载] ${label} ${percent}%`, 'info')
+    sendDownloadProgress: (label, percent) => output.append(`[${t('sys.download')}] ${label} ${percent}%`, 'info')
   });
 
   const service = createFlashService({
@@ -72,7 +75,7 @@ function activate(context) {
     openProjectInVscode
   });
 
-  const provider = new Stm32FlashViewProvider(context.extensionUri, service);
+  const provider = new Stm32FlashViewProvider(context.extensionUri, service, extVersion);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(Stm32FlashViewProvider.viewType, provider, {
       webviewOptions: { retainContextWhenHidden: true }
@@ -94,10 +97,10 @@ function activate(context) {
       const { dir, source } = resolveProjectDir();
       if (dir && source === 'workspace') {
         try { addRecentProject(dir); } catch { /* ignore */ }
-        output.append(`[系统] 已跟随工作区工程: ${dir}`, 'info');
+        output.append(t('sys.workspace_followed', dir), 'info');
       } else if (!dir) {
-        output.append('[系统] 未打开工作区，请选择工程', 'warn');
-        statusBar.setIdle('请选择工程');
+        output.append(t('sys.no_workspace'), 'warn');
+        statusBar.setIdle(t('status.select'));
       }
     }),
     vscode.window.onDidChangeActiveTextEditor(() => {
@@ -116,23 +119,23 @@ function activate(context) {
 
   service.refreshState().then((s) => {
     if (!s.project || !s.project.dir) {
-      output.append('[系统] 未打开工作区，请选择工程', 'warn');
-      statusBar.setIdle('请选择工程');
+      output.append(t('sys.no_workspace'), 'warn');
+      statusBar.setIdle(t('status.select'));
     } else if (s.project.source === 'workspace') {
-      output.append(`[系统] 使用当前 VS Code 工程: ${s.project.dir}`, 'info');
+      output.append(t('sys.using_workspace', s.project.dir), 'info');
     } else {
-      output.append(`[系统] 使用已选工程: ${s.project.dir}`, 'info');
+      output.append(t('sys.using_selected', s.project.dir), 'info');
     }
   }).catch(() => {});
 
-  output.append('[系统] STM32 固件烧录扩展已激活', 'info');
-  output.append(`[系统] 平台: ${platformId()} (${process.platform}/${process.arch})`, 'info');
-  output.append(`[系统] 共用工具链: ${roots0.toolchainRoot}${roots0.hasToolchain ? '' : '（尚未安装，可先在 MCU 工具箱安装）'}`, 'info');
-  output.append(`[系统] 共用 userData: ${roots0.userDataDir}`, 'info');
+  output.append(t('sys.activated'), 'info');
+  output.append(t('sys.platform', platformId(), process.platform, process.arch), 'info');
+  output.append(t('sys.toolchain', roots0.toolchainRoot) + (roots0.hasToolchain ? '' : t('sys.toolchain_not_installed')), 'info');
+  output.append(t('sys.userdata', roots0.userDataDir), 'info');
   if (roots0.hasDesktopConfig) {
-    output.append('[系统] 已读取 MCU 工具箱配置（settings 未填项将回退桌面端路径）', 'info');
+    output.append(t('sys.desktop_config'), 'info');
   }
-  output.append(`[系统] ${platformHint()}`, 'info');
+  output.append(`[System] ${platformHint()}`, 'info');
 }
 
 function deactivate() {
