@@ -28,7 +28,7 @@ const DEFAULT_CONFIG = {
   ghProxy: '', // 可选下载加速镜像前缀，如 https://gh-proxy.com ；留空直连 GitHub
   buildSystem: 'auto', // 'auto' = 按工程文件自动判断；'make' = Makefile(GCC)；'keil' = Keil uVision5(UV4)
   keilUV4Path: String.raw`C:\Keil_v5\UV4\UV4.exe`, // Keil uVision5 的 UV4.exe 路径
-  keilRebuild: false, // true = 重新编译全部(-z)；false = 增量编译(-b)
+  keilRebuild: false, // true = 重新编译全部(-r)；false = 增量编译(-b)
   cubeMxPath: PLATFORM_TC.placeholders.cubeMxPath, // STM32CubeMX 路径（用于把 CubeMX 工程一键生成 Makefile）
   flashMethod: 'pyocd', // 'pyocd' = pyOCD；'openocd' = OpenOCD；'keil' = Keil UV4
   ramLogConfig: {
