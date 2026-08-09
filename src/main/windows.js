@@ -3,6 +3,7 @@
 const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { fileURLToPath } = require('url');
 const bus = require('./core/bus');
 const { loadConfig, saveConfig } = require('./core/config');
 
@@ -25,6 +26,32 @@ let tray = null;
 // 渲染层加载：开发(dev server, npm start 注入 VITE_DEV_SERVER_URL)用 loadURL；
 // 否则加载 Vite 产物 renderer/dist/*.html（打包后亦走此路径）。
 const DEV_URL = process.env.VITE_DEV_SERVER_URL || '';
+const RENDERER_DIST_DIR = path.resolve(__dirname, '..', '..', 'renderer', 'dist');
+
+function isPathInside(baseDir, targetPath) {
+  const rel = path.relative(path.resolve(baseDir), path.resolve(targetPath));
+  return rel === '' || (rel !== '..' && !rel.startsWith('..' + path.sep) && !path.isAbsolute(rel));
+}
+
+function isTrustedRendererUrl(rawUrl) {
+  try {
+    const target = new URL(rawUrl);
+    if (DEV_URL) return target.origin === new URL(DEV_URL).origin;
+    if (target.protocol !== 'file:') return false;
+    return isPathInside(RENDERER_DIST_DIR, fileURLToPath(target));
+  } catch {
+    return false;
+  }
+}
+
+function isTrustedPermissionOrigin(rawOrigin) {
+  const origin = String(rawOrigin || '').trim();
+  if (!origin) return false;
+  if (!DEV_URL) return /^file:\/\//i.test(origin);
+  try { return new URL(origin).origin === new URL(DEV_URL).origin; }
+  catch { return false; }
+}
+
 function loadRenderer(win, page) {
   if (DEV_URL) win.loadURL(DEV_URL.replace(/\/$/, '') + '/' + page);
   else win.loadFile(path.join(__dirname, '..', '..', 'renderer', 'dist', page));
@@ -128,13 +155,40 @@ function debounce(fn, ms = 300) {
 let serialSelectCallback = null;
 function setupSerial(win) {
   const ses = win.webContents.session;
-  // 仅放行串口(serial)权限，避免无条件放开所有权限请求
-  ses.setPermissionCheckHandler((_wc, permission) => permission === 'serial');
-  try { ses.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === 'serial')); } catch {}
-  // 设备授权：用户在 select-serial-port 中选定的串口设备放行
-  try { ses.setDevicePermissionHandler(() => true); } catch {}
+  const cancelSerialSelection = () => {
+    if (!serialSelectCallback) return;
+    try { serialSelectCallback(''); } catch {}
+    serialSelectCallback = null;
+  };
+  const permissionAllowed = (wc, permission, origin, details) => {
+    const requestingOrigin = origin
+      || (details && (details.requestingUrl || details.securityOrigin || details.origin))
+      || (wc && typeof wc.getURL === 'function' ? wc.getURL() : '');
+    return wc === win.webContents
+      && permission === 'serial'
+      && isTrustedRendererUrl(wc.getURL())
+      && isTrustedPermissionOrigin(requestingOrigin);
+  };
+  // 仅可信渲染页面可申请串口权限，其他权限与外部来源一律拒绝。
+  ses.setPermissionCheckHandler((wc, permission, origin, details) => permissionAllowed(wc, permission, origin, details));
+  try {
+    ses.setPermissionRequestHandler((wc, permission, cb, details) => {
+      cb(permissionAllowed(wc, permission, '', details));
+    });
+  } catch {}
+  try {
+    ses.setDevicePermissionHandler((details) => {
+      const origin = (details && (details.origin || details.requestingUrl || details.securityOrigin))
+        || win.webContents.getURL();
+      return !!details
+        && details.deviceType === 'serial'
+        && isTrustedRendererUrl(win.webContents.getURL())
+        && isTrustedPermissionOrigin(origin);
+    });
+  } catch {}
   win.webContents.on('select-serial-port', (event, portList, _wc, callback) => {
     event.preventDefault();
+    cancelSerialSelection();
     serialSelectCallback = callback;
     const list = (portList || []).map((p) => ({
       portId: p.portId, portName: p.portName, displayName: p.displayName,
@@ -144,8 +198,15 @@ function setupSerial(win) {
   });
   // 渲染端选中/取消后回调（传空字符串 = 取消）
   ipcMain.removeAllListeners('serial-pick');
-  ipcMain.on('serial-pick', (_e, portId) => {
+  const handleSerialPick = (_e, portId) => {
+    if (_e && _e.sender && _e.sender !== win.webContents) return;
+    if (!isTrustedRendererUrl(win.webContents.getURL())) return;
     if (serialSelectCallback) { serialSelectCallback(portId || ''); serialSelectCallback = null; }
+  };
+  ipcMain.on('serial-pick', handleSerialPick);
+  win.once('closed', () => {
+    cancelSerialSelection();
+    ipcMain.removeListener('serial-pick', handleSerialPick);
   });
 }
 
@@ -169,6 +230,16 @@ function createWindow() {
   });
   mainWindow.setMenuBarVisibility(false);
   setupSerial(mainWindow);
+
+  // 主窗口只允许停留在打包页面或当前 Vite 开发源，禁止弹出新窗口。
+  const guardNavigation = (event, targetUrl) => {
+    if (isTrustedRendererUrl(targetUrl)) return;
+    event.preventDefault();
+    bus.send(`[安全] 已阻止页面跳转: ${targetUrl}`, 'warn');
+  };
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  mainWindow.webContents.on('will-navigate', guardNavigation);
+  mainWindow.webContents.on('will-redirect', guardNavigation);
   loadRenderer(mainWindow, 'index.html');
 
   // 记忆窗口尺寸/位置：resize/move 去抖保存 + 关闭前再存一次
@@ -238,4 +309,4 @@ function focusOrCreate() {
   }
 }
 
-module.exports = { createWindow, getMainWindow, focusOrCreate, prepareForQuit, applyDockIcon, APP_ICON };
+module.exports = { createWindow, getMainWindow, isTrustedRendererUrl, focusOrCreate, prepareForQuit, applyDockIcon, APP_ICON };

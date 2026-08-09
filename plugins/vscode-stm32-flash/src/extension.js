@@ -24,25 +24,28 @@ const {
 const { addRecentProject } = require('./recentStore');
 const { registerCommands } = require('./commands');
 const { Stm32FlashViewProvider } = require('./webview/panel');
-const { resolveSharedRoots, platformHint, platformId } = require('./toolchainShare');
+const { setExtensionStorageRoot, resolveExtensionRoots, platformHint, platformId } = require('./toolchainShare');
+const { syncPlatformIOToolbar } = require('./platformioToolbar');
+const { createDependencyInstaller } = require('./dependencyInstaller');
 
 /**
  * @param {vscode.ExtensionContext} context
  */
 function activate(context) {
+  setExtensionStorageRoot(context.globalStorageUri.fsPath);
   const extVersion = context.extension.packageJSON.version || '0.0.0';
 
-  // 与桌面端 MCU 工具箱共用 userData/toolchain/tools（按系统解析）
+  // 工具链、辅助工具和历史记录均使用插件自身的全局存储目录。
   const applySharedPaths = () => {
     const cfg = loadFlashConfig();
-    const roots = resolveSharedRoots(cfg);
+    const roots = resolveExtensionRoots(cfg);
     setPathsContext({
       tempDir: () => os.tmpdir(),
       userDataDir: () => roots.userDataDir,
       toolsDir: () => roots.toolsDir,
       toolchainRoot: () => {
         const c = loadFlashConfig();
-        const r = resolveSharedRoots(c);
+        const r = resolveExtensionRoots(c);
         return r.toolchainRoot;
       },
       appInstallRoot: () => roots.appInstallRoot,
@@ -57,10 +60,18 @@ function activate(context) {
 
   const output = createOutput();
   const statusBar = createStatusBar();
+  const dependencyInstaller = createDependencyInstaller(loadFlashConfig, output);
+  statusBar.setPort(loadFlashConfig().serialPort);
+  syncPlatformIOToolbar(context, loadFlashConfig().hidePlatformIOToolbar).catch(() => {});
   bus.setSinks({
     send: (text, type) => output.append(text, type || 'info'),
     sendProgress: (key, text) => output.append(text, 'progress', key),
-    sendDownloadProgress: (label, percent) => output.append(`[${t('sys.download')}] ${label} ${percent}%`, 'info')
+    sendDownloadProgress: (label, percent) => {
+      dependencyInstaller.reportDownload(label, percent);
+      if (label && (percent < 0 || percent % 10 === 0 || percent === 100)) {
+        output.append(`[${t('sys.download')}] ${label} ${percent < 0 ? '' : percent + '%'}`, 'progress');
+      }
+    }
   });
 
   const service = createFlashService({
@@ -77,6 +88,7 @@ function activate(context) {
 
   const provider = new Stm32FlashViewProvider(context.extensionUri, service, extVersion);
   context.subscriptions.push(
+    provider,
     vscode.window.registerWebviewViewProvider(Stm32FlashViewProvider.viewType, provider, {
       webviewOptions: { retainContextWhenHidden: true }
     })
@@ -87,13 +99,15 @@ function activate(context) {
     output,
     pickProjectDir,
     ensureProjectDir,
-    provider
+    dependencyInstaller
   });
+
+  let activeProjectDir = resolveProjectDir().dir;
 
   context.subscriptions.push(
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
+      activeProjectDir = resolveProjectDir().dir;
       service.refreshState().catch(() => {});
-      provider.refresh();
       const { dir, source } = resolveProjectDir();
       if (dir && source === 'workspace') {
         try { addRecentProject(dir); } catch { /* ignore */ }
@@ -104,20 +118,24 @@ function activate(context) {
       }
     }),
     vscode.window.onDidChangeActiveTextEditor(() => {
+      const nextProjectDir = resolveProjectDir().dir;
+      if (nextProjectDir === activeProjectDir) return;
+      activeProjectDir = nextProjectDir;
       service.refreshState().catch(() => {});
-      provider.refresh();
     }),
     onConfigChange(() => {
       applySharedPaths();
+      const cfg = loadFlashConfig();
+      statusBar.setPort(cfg.serialPort);
+      syncPlatformIOToolbar(context, cfg.hidePlatformIOToolbar).catch(() => {});
       service.refreshState().catch(() => {});
-      provider.refresh();
     }),
-    statusBar.item,
+    ...statusBar.items,
     output.channel,
     { dispose: () => bus.setSinks({ send: () => {}, sendProgress: () => {}, sendDownloadProgress: () => {} }) }
   );
 
-  service.refreshState().then((s) => {
+  service.refreshState().then(async (s) => {
     if (!s.project || !s.project.dir) {
       output.append(t('sys.no_workspace'), 'warn');
       statusBar.setIdle(t('status.select'));
@@ -126,15 +144,15 @@ function activate(context) {
     } else {
       output.append(t('sys.using_selected', s.project.dir), 'info');
     }
+    const readiness = await service.refreshReadiness(false);
+    const installed = await dependencyInstaller.maybeAutoInstall(readiness);
+    if (installed && installed.ok) await service.refreshState();
   }).catch(() => {});
 
   output.append(t('sys.activated'), 'info');
   output.append(t('sys.platform', platformId(), process.platform, process.arch), 'info');
   output.append(t('sys.toolchain', roots0.toolchainRoot) + (roots0.hasToolchain ? '' : t('sys.toolchain_not_installed')), 'info');
   output.append(t('sys.userdata', roots0.userDataDir), 'info');
-  if (roots0.hasDesktopConfig) {
-    output.append(t('sys.desktop_config'), 'info');
-  }
   output.append(`[System] ${platformHint()}`, 'info');
 }
 

@@ -31,6 +31,13 @@ test('settings page shows platform-specific PATH metadata', () => {
   assert.match(source, /pathEnv\.message/);
 });
 
+test('settings page exposes separate app update mirror and toolchain proxy fields', () => {
+  assert.match(source, /label="应用更新镜像"/);
+  assert.match(source, /v-model="draft\.updateFeedUrl"/);
+  assert.match(source, /label="工具链下载代理"/);
+  assert.match(source, /latest\.yml \/ latest-linux\.yml \/ latest-mac\.yml/);
+});
+
 test('settings page balances compile, flash and toolchain sections', () => {
   assert.match(source, /class="set-config-grid set-balanced-grid"/);
   assert.match(source, /class="set-subsection set-balanced-panel"/);

@@ -1,11 +1,12 @@
 // BusyBox、Python 工具和默认交叉编译工具链的安装流程。
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const { getToolchainDownloadPlan } = require('./platform-toolchains');
 const { PLATFORM_TC } = require('../core/env');
 const { applyMirror, downloadFast } = require('./downloader');
 const bus = require('../core/bus');
-const { runProcess } = require('./proc');
+const { runProcess, runCapture } = require('./proc');
 const {
   toolsDir,
   toolchainRoot,
@@ -19,6 +20,179 @@ const {
   migrateLegacyToolchainIfNeeded
 } = require('./paths');
 const { APPLETS, systemLogLabel, defaultToolchainStatus } = require('./status');
+
+const MANAGED_DOWNLOAD_DIRS = new Set(['gcc', 'make', 'openocd']);
+
+function samePath(left, right) {
+  const a = path.resolve(left);
+  const b = path.resolve(right);
+  return process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
+}
+
+function managedDestination(destDir) {
+  const root = path.resolve(toolchainRoot());
+  const dest = path.resolve(destDir);
+  const name = path.basename(dest).toLowerCase();
+  if (!samePath(path.dirname(dest), root) || !MANAGED_DOWNLOAD_DIRS.has(name)) {
+    throw new Error(`拒绝操作非托管工具链目录: ${dest}`);
+  }
+  return { root, dest, name };
+}
+
+function removeManagedTemp(dirPath, root, prefix, ignoreErrors = false) {
+  const resolved = path.resolve(dirPath);
+  const baseName = path.basename(resolved);
+  const prefixMatches = process.platform === 'win32'
+    ? baseName.toLowerCase().startsWith(String(prefix).toLowerCase())
+    : baseName.startsWith(prefix);
+  if (!samePath(path.dirname(resolved), root) || !prefixMatches) {
+    throw new Error(`拒绝清理非托管临时目录: ${resolved}`);
+  }
+  try { fs.rmSync(resolved, { recursive: true, force: true }); }
+  catch (e) {
+    if (!ignoreErrors) throw e;
+    return e;
+  }
+  return null;
+}
+
+function hashFile(filePath, algorithm) {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash(algorithm);
+    const input = fs.createReadStream(filePath);
+    input.on('data', (chunk) => hash.update(chunk));
+    input.on('error', reject);
+    input.on('end', () => resolve(hash.digest()));
+  });
+}
+
+async function verifyArchiveHash(archive, spec) {
+  const expectedSha256 = String((spec && spec.sha256) || '').trim();
+  const expectedSha512 = String((spec && spec.sha512) || '').trim();
+  const algorithm = expectedSha256 ? 'sha256' : (expectedSha512 ? 'sha512' : '');
+  const expected = expectedSha256 || expectedSha512;
+  if (!algorithm) return { verified: false, algorithm: '' };
+  const digestBytes = algorithm === 'sha256' ? 32 : 64;
+  let expectedBuf;
+  if (new RegExp(`^[a-f0-9]{${digestBytes * 2}}$`, 'i').test(expected)) {
+    expectedBuf = Buffer.from(expected, 'hex');
+  } else if (/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(expected)) {
+    expectedBuf = Buffer.from(expected, 'base64');
+  } else {
+    throw new Error(`${algorithm.toUpperCase()} 配置格式无效`);
+  }
+  if (expectedBuf.length !== digestBytes) {
+    throw new Error(`${algorithm.toUpperCase()} 配置长度无效`);
+  }
+  const actualBuf = await hashFile(archive, algorithm);
+  if (expectedBuf.length !== actualBuf.length || !crypto.timingSafeEqual(expectedBuf, actualBuf)) {
+    throw new Error(`${algorithm.toUpperCase()} 校验失败`);
+  }
+  return { verified: true, algorithm };
+}
+
+function validateArchiveEntryNames(text) {
+  for (const raw of String(text || '').split(/\r?\n/)) {
+    const name = raw.trim().replace(/\\/g, '/');
+    if (!name || name === '.') continue;
+    if (name.startsWith('/') || /^[a-z]:\//i.test(name) || name.split('/').includes('..')) {
+      throw new Error(`安装包包含越界路径: ${raw}`);
+    }
+  }
+}
+
+function isPathInside(baseDir, targetPath) {
+  const rel = path.relative(path.resolve(baseDir), path.resolve(targetPath));
+  return rel === '' || (rel !== '..' && !rel.startsWith('..' + path.sep) && !path.isAbsolute(rel));
+}
+
+function validateExtractedTree(rootDir) {
+  const root = fs.realpathSync(rootDir);
+  const pending = [rootDir];
+  while (pending.length) {
+    const current = pending.pop();
+    for (const entry of fs.readdirSync(current)) {
+      const full = path.join(current, entry);
+      const stat = fs.lstatSync(full);
+      if (stat.isSymbolicLink()) {
+        let target;
+        try { target = fs.realpathSync(full); }
+        catch { throw new Error(`安装包包含无法解析的符号链接: ${path.relative(rootDir, full)}`); }
+        if (!isPathInside(root, target)) {
+          throw new Error(`安装包符号链接越界: ${path.relative(rootDir, full)}`);
+        }
+      } else if (stat.isDirectory()) {
+        pending.push(full);
+      }
+    }
+  }
+}
+
+async function extractArchive(spec, archive, stagingDir) {
+  if (spec.archiveType === 'tar.gz') {
+    const listed = await runCapture('tar', ['-tzf', archive], { shell: false, timeoutMs: 120000 });
+    if (listed.code !== 0) throw new Error(`无法读取 tar 安装包 (exit ${listed.code})`);
+    validateArchiveEntryNames(listed.out);
+    return await runProcess('tar', ['-xzf', archive, '-C', stagingDir], { shell: false });
+  }
+
+  const psScript = [
+    "$ErrorActionPreference = 'Stop'",
+    'Add-Type -AssemblyName System.IO.Compression.FileSystem',
+    '$archive = [IO.Path]::GetFullPath($env:MCU_TOOLBOX_ARCHIVE)',
+    '$dest = [IO.Path]::GetFullPath($env:MCU_TOOLBOX_DEST)',
+    '$prefix = $dest.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar',
+    '$zip = [IO.Compression.ZipFile]::OpenRead($archive)',
+    'try {',
+    '  foreach ($entry in $zip.Entries) {',
+    '    $target = [IO.Path]::GetFullPath([IO.Path]::Combine($dest, $entry.FullName))',
+    '    if ($target -ne $dest -and -not $target.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {',
+    "      throw ('安装包包含越界路径: ' + $entry.FullName)",
+    '    }',
+    '  }',
+    '} finally { $zip.Dispose() }',
+    'Expand-Archive -LiteralPath $archive -DestinationPath $dest -Force'
+  ].join('\n');
+  const encoded = Buffer.from(psScript, 'utf16le').toString('base64');
+  return await runProcess(
+    'powershell',
+    ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded],
+    {
+      shell: false,
+      env: Object.assign({}, process.env, {
+        MCU_TOOLBOX_ARCHIVE: archive,
+        MCU_TOOLBOX_DEST: stagingDir
+      })
+    }
+  );
+}
+
+function replaceDirectoryTransactional(destDir, stagingDir, root, name) {
+  const backupDir = path.join(root, `${name}.backup-${process.pid}-${Date.now()}`);
+  removeManagedTemp(backupDir, root, `${name}.backup-`);
+  let movedExisting = false;
+  try {
+    if (fs.existsSync(destDir)) {
+      fs.renameSync(destDir, backupDir);
+      movedExisting = true;
+    }
+    fs.renameSync(stagingDir, destDir);
+  } catch (e) {
+    let rollbackError = null;
+    if (movedExisting && !fs.existsSync(destDir) && fs.existsSync(backupDir)) {
+      try { fs.renameSync(backupDir, destDir); }
+      catch (rollback) { rollbackError = rollback; }
+    }
+    if (rollbackError) {
+      throw new Error(`安装替换失败: ${e.message}; 回滚失败: ${rollbackError.message}`);
+    }
+    throw e;
+  }
+  const cleanupError = removeManagedTemp(backupDir, root, `${name}.backup-`, true);
+  if (cleanupError) {
+    bus.send(`[环境] 工具链已替换，但旧备份目录清理失败: ${backupDir} (${cleanupError.message})`, 'warn');
+  }
+}
 
 async function installToolchain(cfg = {}) {
   if (PLATFORM_TC.commandTools.mode !== 'busybox') {
@@ -162,16 +336,24 @@ async function installLocalEsptool(force = false) {
 
 async function downloadAndExtract(spec, label, destDir, cfg) {
   if (!spec || spec.mode !== 'download' || !spec.url) return false;
+  if (spec.archiveType !== 'zip' && spec.archiveType !== 'tar.gz') {
+    throw new Error(`不支持的安装包格式: ${spec.archiveType || '未指定'}`);
+  }
   if (process.platform !== 'win32' && spec.archiveType === 'zip') {
     bus.send(`[环境] ✗ 平台匹配错误：${PLATFORM_TC.label} 不应下载 ${label} 的 Windows zip 包`, 'error');
     bus.send(`[环境] 当前系统: ${process.platform}/${process.arch}`, 'error');
     bus.send(`[环境] 错误地址: ${spec.url || '无'}`, 'error');
     return false;
   }
-  fs.mkdirSync(toolchainRoot(), { recursive: true });
+  const managed = managedDestination(destDir);
+  fs.mkdirSync(managed.root, { recursive: true });
   const archiveExt = spec.archiveType === 'tar.gz' ? '.tar.gz' : '.zip';
-  const archiveName = spec.fileName || (label + archiveExt);
-  const archive = path.join(toolchainRoot(), archiveName);
+  const requestedArchiveName = spec.fileName || (label + archiveExt);
+  const archiveName = path.basename(requestedArchiveName);
+  if (archiveName !== requestedArchiveName || !archiveName) {
+    throw new Error(`非法安装包文件名: ${requestedArchiveName}`);
+  }
+  const archive = path.join(managed.root, archiveName);
   const downloadUrl = applyMirror(spec.url, cfg);
   bus.send(`[环境] 正在下载 ${label}（8 线程加速）...`, 'step');
   bus.send(`[系统] 当前系统: ${systemLogLabel()}`, 'info');
@@ -180,13 +362,27 @@ async function downloadAndExtract(spec, label, destDir, cfg) {
   bus.send(`[环境] 原始地址: ${spec.url}`, 'info');
   if (downloadUrl !== spec.url) bus.send(`[环境] 实际地址: ${downloadUrl}`, 'info');
   bus.send(`[环境] 保存路径: ${archive}`, 'info');
-  bus.send(`[环境] 解压目录: ${destDir}`, 'info');
+  bus.send(`[环境] 解压目录: ${managed.dest}`, 'info');
   bus.send(`[环境] 手动下载: 如自动下载失败，可下载上面的原始地址，并将文件放到保存路径后重试`, 'info');
   let lastPct = -1, lastT = 0;
+  let reuseArchive = false;
   const existingMb = fs.existsSync(archive) ? ((fs.statSync(archive).size / 1048576) | 0) : 0;
   if (existingMb >= 10) {
-    bus.send(`[环境] 检测到本地安装包 (${existingMb} MB)，跳过下载直接解压`, 'info');
-  } else {
+    try {
+      const integrity = await verifyArchiveHash(archive, spec);
+      reuseArchive = true;
+      bus.send(
+        integrity.verified
+          ? `[环境] 检测到已校验的本地安装包 (${existingMb} MB)，跳过下载`
+          : `[环境] 检测到本地安装包 (${existingMb} MB)，未提供哈希，直接尝试解压`,
+        integrity.verified ? 'success' : 'warn'
+      );
+    } catch (e) {
+      bus.send(`[环境] 本地安装包校验失败，删除后重新下载: ${e.message}`, 'warn');
+      try { fs.unlinkSync(archive); } catch {}
+    }
+  }
+  if (!reuseArchive) {
     try {
       await downloadFast(downloadUrl, archive, (received, total) => {
         const t = Date.now();
@@ -218,27 +414,35 @@ async function downloadAndExtract(spec, label, destDir, cfg) {
       throw e;
     }
   }
-  const mb = (fs.statSync(archive).size / 1048576) | 0;
-  bus.send(`[环境] ✓ ${label} 下载完成 (${mb} MB)，正在解压 ...`, 'info');
-  try { fs.rmSync(destDir, { recursive: true, force: true }); } catch {}
-  fs.mkdirSync(destDir, { recursive: true });
-  let code;
-  if (spec.archiveType === 'tar.gz') {
-    code = await runProcess('tar', ['-xzf', archive, '-C', destDir], { shell: false });
-  } else {
-    code = await runProcess(
-      'powershell',
-      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
-       `Expand-Archive -LiteralPath '${archive}' -DestinationPath '${destDir}' -Force`],
-      { shell: false }
-    );
+  try {
+    const integrity = await verifyArchiveHash(archive, spec);
+    if (integrity.verified) bus.send(`[环境] ✓ ${label} ${integrity.algorithm.toUpperCase()} 校验通过`, 'success');
+    else bus.send(`[环境] ${label} 未配置哈希，仅完成 HTTPS 与下载长度校验`, 'warn');
+  } catch (e) {
+    try { fs.unlinkSync(archive); } catch {}
+    throw e;
   }
-  if (code !== 0) {
-    bus.send(`[环境] ✗ ${label} 解压失败 (exit ${code})`, 'error');
+  const mb = (fs.statSync(archive).size / 1048576) | 0;
+  bus.send(`[环境] ✓ ${label} 下载完成 (${mb} MB)，正在临时目录解压 ...`, 'info');
+  const stagingDir = path.join(managed.root, `${managed.name}.install-${process.pid}-${Date.now()}`);
+  removeManagedTemp(stagingDir, managed.root, `${managed.name}.install-`);
+  fs.mkdirSync(stagingDir, { recursive: true });
+  try {
+    const code = await extractArchive(spec, archive, stagingDir);
+    if (code !== 0) throw new Error(`解压进程退出码 ${code}`);
+    if (!fs.readdirSync(stagingDir).length) throw new Error('解压结果为空');
+    validateExtractedTree(stagingDir);
+    replaceDirectoryTransactional(managed.dest, stagingDir, managed.root, managed.name);
+  } catch (e) {
+    const cleanupError = removeManagedTemp(stagingDir, managed.root, `${managed.name}.install-`, true);
+    if (cleanupError) {
+      bus.send(`[环境] 临时解压目录清理失败: ${stagingDir} (${cleanupError.message})`, 'warn');
+    }
+    bus.send(`[环境] ✗ ${label} 安装失败，已保留原工具链: ${e.message}`, 'error');
     return false;
   }
   try { fs.unlinkSync(archive); } catch {}
-  bus.send(`[环境] ✓ ${label} 解压完成`, 'success');
+  bus.send(`[环境] ✓ ${label} 已完成校验、解压与原子替换`, 'success');
   return true;
 }
 

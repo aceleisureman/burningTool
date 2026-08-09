@@ -51,7 +51,7 @@
 ├── plugins/
 │   └── vscode-stm32-flash/ # MCU-Assistant VS Code 扩展（复用 flash-core）
 │
-├── tests/                  # node:test 单元测试（19 个测试文件）
+├── tests/                  # node:test 单元测试（23 个测试文件）
 ├── scripts/                # 开发辅助脚本（dev、stop、sync-ext-vendor、package-ext）
 └── assets/                 # 应用图标
 ```
@@ -112,7 +112,7 @@ npm run start:prod # 先 build 再启动（模拟生产）
 
 ## VS Code 扩展（MCU-Assistant）
 
-位于 `plugins/vscode-stm32-flash/`，版本 `0.1.15`。
+位于 `plugins/vscode-stm32-flash/`，版本 `0.1.45`。
 
 **功能：** STM32 编译、烧录、一键编译烧录、Makefile 生成、烧录器检测、芯片信息读取。
 
@@ -140,6 +140,42 @@ npm run dist:linux      # Linux AppImage
 
 发布配置：GitHub Releases，仓库 `aceleisureman/burningTool`，支持 `electron-updater` 自动更新。
 
+### 自动更新加速
+
+国内网络可在「设置 → 路径与系统集成 → 应用更新镜像」中配置 HTTPS 更新源。留空时使用 GitHub 官方源；镜像的清单检查或安装包下载失败时，会自动回退官方源。
+
+镜像应完整同步同一版本的 Release 产物，建议直接同步全部附件：
+
+| 平台 | 必需文件 |
+|---|---|
+| Windows | `latest.yml`、NSIS 安装包；建议同步对应 `.blockmap` |
+| Linux x64 | `latest-linux.yml`、AppImage；建议同步对应更新文件 |
+| macOS | `latest-mac.yml`、清单指向的 `.zip` |
+
+可使用自建 OSS/CDN/R2 等静态目录，也可填写兼容 Generic Update Feed 的 GitHub 代理完整目录，例如：
+
+```text
+https://proxy.example/https://github.com/aceleisureman/burningTool/releases/latest/download/
+```
+
+代理必须支持 `latest*.yml`、Release 文件重定向和 Range 请求。项目不内置未经确认的公共代理；更新地址仅允许 HTTPS 且不能包含用户名或密码。更新镜像拥有分发可执行程序的能力，应仅使用可信、自管的服务。macOS 自管更新继续校验清单中的 SHA-512。
+
+---
+
+## 稳定性边界
+
+为避免异常工具输出、超大调试消息或导入文件长期占用内存，桌面端设置了以下上限：
+
+| 场景 | 上限与行为 |
+|---|---|
+| 子进程捕获输出 | 默认仅保留最后 8 MiB；单行超过 64 Ki 字符时分段处理，并返回截断标记 |
+| MQTT | 最多 32 个同时在线连接、每连接启用 256 个订阅；单条收发载荷 256 KiB，主进程待推送队列最多 4 MiB |
+| MQTT 历史 | 单连接内存历史约 4 Mi 字符；写入 `config.json` 的消息文本最多 128 Ki 字符/连接 |
+| 串口终端 | 单次写入最多 1 MiB；接收数据按最多 64 KiB 的 IPC 数据块推送 |
+| 快捷指令文件 | 导入/导出最多 2 MiB、128 个分组、4096 条指令 |
+
+超过上限的接收/显示内容会明确标记为已截断；主动发布或写入超过上限时会直接返回错误，不会静默发送部分数据。
+
 ---
 
 ## 测试
@@ -150,7 +186,7 @@ npm run dist:linux      # Linux AppImage
 npm test
 ```
 
-覆盖模块包括：bus、config、firmware-analyzer、flash-parsing、hardware-debug、platform-toolchains、pyocd-diagnostics、ramlog、stm32-targets、openocd-paths、build-system、makefile-startup-repair、http-server、proc、esp32、flash-command-size、flash-layout、settings-layout、toolchain-version。
+覆盖模块包括：build-system、bus、config、crc、downloader、esp32、firmware-analyzer、flash-command-size、flash-layout、flash-parsing、hardware-debug、http-server、makefile-startup-repair、openocd-paths、platform-toolchains、preload-api、proc、pyocd-diagnostics、ramlog、settings-layout、stm32-targets、toolchain-version、update-source、util。
 
 新增主进程模块时建议同步补充对应测试文件。
 

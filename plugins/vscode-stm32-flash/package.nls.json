@@ -11,8 +11,10 @@
   "cmd.checkProbe": "STM32: Check Probe",
   "cmd.readChipInfo": "STM32: Read Chip Info",
   "cmd.cancel": "STM32: Cancel",
+  "cmd.selectSerialPort": "MCU: Select Flash Serial Port",
   "cmd.openOutput": "STM32: Open Log",
   "cmd.openSettings": "STM32: Open Settings",
+  "cmd.installDependencies": "MCU: Download Missing Dependencies",
   "cfg.projectDir.desc": "Manually specify project directory (fallback when no VS Code workspace is open; workspace takes priority by default)",
   "cfg.targetChip.desc": "Target chip (pyOCD target id), used as fallback when auto-detection fails",
   "cfg.flashMethod.desc": "Flash method",
@@ -28,9 +30,12 @@
   "cfg.keilUV4Path.desc": "Keil UV4.exe path (Windows only)",
   "cfg.keilRebuild.desc": "Keil full rebuild (-r)",
   "cfg.cubeMxPath.desc": "STM32CubeMX executable path",
-  "cfg.toolchainRootPath.desc": "Toolchain root directory. Leave blank to share with MCU Toolbox: Windows %APPDATA%\\stm32-flasher\\toolchain, macOS ~/Library/Application Support/stm32-flasher/toolchain, Linux ~/.config/stm32-flasher/toolchain",
-  "cfg.ghProxy.desc": "GitHub download mirror prefix, e.g. https://gh-proxy.com (falls back to MCU Toolbox setting when not set)",
-  "cfg.toolchainMode.desc": "default = prefer toolchain already installed in shared directory; custom = prefer custom paths above. Falls back to MCU Toolbox setting when not set",
+  "cfg.toolchainRootPath.desc": "Toolchain root directory. Leave blank to use MCU-Assistant extension storage.",
+  "cfg.ghProxy.desc": "GitHub download mirror prefix, e.g. https://gh-proxy.com.",
+  "cfg.toolchainMode.desc": "default = use the extension toolchain directory; custom = prefer the custom paths above.",
   "cfg.projectMode.desc": "Project mode: stm32cube (Makefile/GCC), keil5 (Keil UV4), esp32 (ESP32 toolchains)",
-  "cfg.esp32SubMode.desc": "ESP32 sub-mode: platformio (PlatformIO CLI), arduino (Arduino CLI), idf (ESP-IDF), micropython (MicroPython)"
+  "cfg.esp32SubMode.desc": "ESP32 sub-mode: platformio (PlatformIO CLI), arduino (Arduino CLI), idf (ESP-IDF), micropython (MicroPython)",
+  "cfg.serialPort.desc": "Serial port used for ESP32 flashing. Leave blank to auto-detect.",
+  "cfg.hidePlatformIOToolbar.desc": "Hide PlatformIO toolbar shortcuts and use the compact MCU-Assistant status bar actions instead.",
+  "cfg.autoDownloadDependencies.desc": "Automatically download GCC, make, pyOCD, and OpenOCD when the STM32Cube default toolchain is missing."
 }

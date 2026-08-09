@@ -2,6 +2,13 @@
 const electronAPI = require('electron');
 const { contextBridge, ipcRenderer } = electronAPI;
 
+function onRendererEvent(channel, cb) {
+  if (typeof cb !== 'function') return () => {};
+  const handler = (_event, ...args) => cb(...args);
+  ipcRenderer.on(channel, handler);
+  return () => ipcRenderer.removeListener(channel, handler);
+}
+
 contextBridge.exposeInMainWorld('api', {
   selectDirectory: () => ipcRenderer.invoke('select-directory'),
   selectFirmwareFile: () => ipcRenderer.invoke('select-firmware-file'),
@@ -10,6 +17,8 @@ contextBridge.exposeInMainWorld('api', {
   buildAndFlash:   (dir) => ipcRenderer.invoke('build-and-flash', dir),
   getConfig:        () => ipcRenderer.invoke('get-config'),
   saveConfig:       (cfg) => ipcRenderer.invoke('save-config', cfg),
+  getMqttHistory:   () => ipcRenderer.invoke('get-mqtt-history'),
+  saveMqttHistory:  (data) => ipcRenderer.invoke('save-mqtt-history', data),
   getPlatform:      () => ipcRenderer.invoke('get-platform'),
   getPlatformToolchain: () => ipcRenderer.invoke('get-platform-toolchain'),
   resetConfig:      () => ipcRenderer.invoke('reset-config'),
@@ -38,24 +47,24 @@ contextBridge.exposeInMainWorld('api', {
   esp32ToolStatus:  () => ipcRenderer.invoke('esp32-tool-status'),
   installEsptool:   (opts) => ipcRenderer.invoke('install-esptool', opts),
   flashEsp32:       (opts) => ipcRenderer.invoke('flash-esp32', opts),
-  onLog:           (cb) => ipcRenderer.on('log', (_e, data) => cb(data)),
-  onDownloadProgress: (cb) => ipcRenderer.on('download-progress', (_e, data) => cb(data)),
+  onLog:           (cb) => onRendererEvent('log', cb),
+  onDownloadProgress: (cb) => onRendererEvent('download-progress', cb),
   // ── 串口调试（serialport 后端）──
   serialList:       () => ipcRenderer.invoke('serial-list'),                 // 枚举所有 COM 口（含识别信息）
   serialOpen:       (opts) => ipcRenderer.invoke('serial-open', opts),       // 按路径打开串口
   serialWrite:      (data) => ipcRenderer.invoke('serial-write', data),      // 写字节数组
   serialClose:      () => ipcRenderer.invoke('serial-close'),                // 关闭
-  onSerialData:     (cb) => ipcRenderer.on('serial-data', (_e, arr) => cb(arr)),   // 接收数据（字节数组）
-  onSerialClosed:   (cb) => ipcRenderer.on('serial-closed', () => cb()),           // 串口被关闭/掉线
-  onSerialError:    (cb) => ipcRenderer.on('serial-error', (_e, msg) => cb(msg)),  // 串口错误
+  onSerialData:     (cb) => onRendererEvent('serial-data', cb),   // 接收数据（字节数组）
+  onSerialClosed:   (cb) => onRendererEvent('serial-closed', cb), // 串口被关闭/掉线
+  onSerialError:    (cb) => onRendererEvent('serial-error', cb),  // 串口错误
   // ── MQTT 调试（mqtt.js 后端）──
   mqttConnect:      (opts) => ipcRenderer.invoke('mqtt-connect', opts),       // 连接 broker
   mqttDisconnect:   (opts) => ipcRenderer.invoke('mqtt-disconnect', opts),    // 断开（按连接 id）
   mqttSubscribe:    (opts) => ipcRenderer.invoke('mqtt-subscribe', opts),     // 订阅 {topic,qos}
   mqttUnsubscribe:  (opts) => ipcRenderer.invoke('mqtt-unsubscribe', opts),   // 退订 {topic}
   mqttPublish:      (opts) => ipcRenderer.invoke('mqtt-publish', opts),       // 发布 {topic,payload,qos,retain}
-  onMqttStatus:     (cb) => ipcRenderer.on('mqtt-status', (_e, s) => cb(s)),  // 连接状态变化
-  onMqttMessage:    (cb) => ipcRenderer.on('mqtt-message', (_e, m) => cb(m)),
+  onMqttStatus:     (cb) => onRendererEvent('mqtt-status', cb),  // 连接状态变化
+  onMqttMessage:    (cb) => onRendererEvent('mqtt-message', cb),
   // ── 本地 HTTP API ──
   httpApiStatus:    () => ipcRenderer.invoke('http-api-status'),
   httpApiStart:     (opts) => ipcRenderer.invoke('http-api-start', opts),
@@ -64,10 +73,6 @@ contextBridge.exposeInMainWorld('api', {
   updateCheck:      () => ipcRenderer.invoke('update-check'),    // 手动检查更新
   updateStatus:     () => ipcRenderer.invoke('update-status'),   // 当前更新状态/进度
   updateInstall:    () => ipcRenderer.invoke('update-install'),  // 重启并安装已下载的更新
-  onUpdateStatus:   (cb) => {                                   // 主进程主动推送状态（下载进度/完成）
-    const handler = (_e, s) => cb(s);
-    ipcRenderer.on('update-status', handler);
-    return () => ipcRenderer.removeListener('update-status', handler);
-  },
+  onUpdateStatus:   (cb) => onRendererEvent('update-status', cb), // 主进程主动推送状态（下载进度/完成）
   copyToClipboard:  (text) => ipcRenderer.invoke('clipboard-write', text)  // 收到消息
 });

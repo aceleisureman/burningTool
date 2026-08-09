@@ -106,8 +106,8 @@
   "status.fail": "$(error) MCU-Assistant failed",
   "status.idle": "$(chip) MCU-Assistant",
   "status.select": "Select project",
-  "recent.empty": "No recent projects (shared with MCU Toolbox)",
-  "recent.title": "Recent Projects (shared with MCU Toolbox)",
+  "recent.empty": "No recent projects",
+  "recent.title": "MCU-Assistant Recent Projects",
   "recent.placeholder": "Select to switch VS Code workspace",
   "recent.dir_missing": "Directory does not exist: {0}",
   "recent.remove_action": "Remove from history"

@@ -11,8 +11,10 @@
   "cmd.checkProbe": "STM32: 检测烧录器",
   "cmd.readChipInfo": "STM32: 读取芯片信息",
   "cmd.cancel": "STM32: 取消当前任务",
+  "cmd.selectSerialPort": "MCU: 选择烧录串口",
   "cmd.openOutput": "STM32: 打开日志",
   "cmd.openSettings": "STM32: 打开设置",
+  "cmd.installDependencies": "MCU: 下载缺失依赖",
   "cfg.projectDir.desc": "手动指定的工程目录（仅当 VS Code 未打开工作区时作为回退；默认优先使用当前工作区）",
   "cfg.targetChip.desc": "目标芯片（pyOCD target id），自动识别失败时回退",
   "cfg.flashMethod.desc": "烧录方式",
@@ -28,9 +30,12 @@
   "cfg.keilUV4Path.desc": "Keil UV4.exe 路径（仅 Windows）",
   "cfg.keilRebuild.desc": "Keil 全量重新编译（-r）",
   "cfg.cubeMxPath.desc": "STM32CubeMX 可执行文件路径",
-  "cfg.toolchainRootPath.desc": "工具链根目录。留空则与 MCU 工具箱共用：Windows %APPDATA%\\stm32-flasher\\toolchain，macOS ~/Library/Application Support/stm32-flasher/toolchain，Linux ~/.config/stm32-flasher/toolchain",
-  "cfg.ghProxy.desc": "GitHub 下载镜像前缀，如 https://gh-proxy.com（未配置时回退 MCU 工具箱设置）",
-  "cfg.toolchainMode.desc": "default=优先共用目录内已安装工具链；custom=优先使用上方自定义路径。未配置时回退 MCU 工具箱设置",
+  "cfg.toolchainRootPath.desc": "工具链根目录。留空时使用 MCU-Assistant 插件独立存储目录。",
+  "cfg.ghProxy.desc": "GitHub 下载镜像前缀，如 https://gh-proxy.com。",
+  "cfg.toolchainMode.desc": "default=使用插件工具链目录；custom=优先使用上方自定义路径。",
   "cfg.projectMode.desc": "工程模式：stm32cube（Makefile/GCC）、keil5（Keil UV4）、esp32（ESP32 工具链）",
-  "cfg.esp32SubMode.desc": "ESP32 子模式：platformio（PlatformIO CLI）、arduino（Arduino CLI）、idf（ESP-IDF）、micropython（MicroPython）"
+  "cfg.esp32SubMode.desc": "ESP32 子模式：platformio（PlatformIO CLI）、arduino（Arduino CLI）、idf（ESP-IDF）、micropython（MicroPython）",
+  "cfg.serialPort.desc": "ESP32 烧录使用的串口，留空时由烧录工具自动检测。",
+  "cfg.hidePlatformIOToolbar.desc": "隐藏 PlatformIO 工具栏快捷方式，改用 MCU-Assistant 的精简状态栏操作。",
+  "cfg.autoDownloadDependencies.desc": "检测到 STM32Cube 默认工具链缺失时自动下载 GCC、make、pyOCD 和 OpenOCD。"
 }

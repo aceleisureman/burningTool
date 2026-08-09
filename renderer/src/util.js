@@ -28,14 +28,17 @@ export function highlightJson(text) {
   );
 }
 
-// 自动格式化 JSON payload（非 HEX 且能解析时缩进美化）
-export function fmtPayload(text, isHex) {
-  if (isHex) return { text: text || '', json: false };
-  const t = (text || '').trim();
+// 自动格式化 JSON payload（非 HEX 且能解析时缩进美化）。大消息可传 maxJsonChars 跳过解析/高亮。
+export function fmtPayload(text, isHex, maxJsonChars = Infinity) {
+  const raw = String(text ?? '');
+  if (isHex) return { text: raw, json: false };
+  const limit = Number(maxJsonChars);
+  if (Number.isFinite(limit) && raw.length > Math.max(0, limit)) return { text: raw, json: false };
+  const t = raw.trim();
   if ((t[0] === '{' && t[t.length - 1] === '}') || (t[0] === '[' && t[t.length - 1] === ']')) {
     try { return { text: JSON.stringify(JSON.parse(t), null, 2), json: true }; } catch (e) { /* 非合法 JSON，原样返回 */ }
   }
-  return { text: text || '', json: false };
+  return { text: raw, json: false };
 }
 
 // MQTT 主题通配匹配（# 多级，+ 单级）
@@ -77,8 +80,12 @@ export function portSubLabel(p) {
 const UNIT_MS = { ms: 1, s: 1000, min: 60000 };
 export function cmdDelayMs(q) { return (Number(q.interval) || 0) * (UNIT_MS[q.unit] || 1); }
 
+const HEX_BYTES = Array.from({ length: 256 }, (_v, i) => i.toString(16).padStart(2, '0').toUpperCase());
 export function bytesToHex(u8) {
-  return Array.from(u8).map((b) => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+  const bytes = u8 || [];
+  const out = new Array(bytes.length || 0);
+  for (let i = 0; i < out.length; i++) out[i] = HEX_BYTES[bytes[i] & 0xFF];
+  return out.join(' ');
 }
 export function hexToBytes(str) {
   const clean = String(str).replace(/0x/gi, '').replace(/[^0-9a-fA-F]/g, '');

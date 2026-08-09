@@ -77,7 +77,21 @@ html {
       --nav-bg:#e7efe7;
       --el-color-primary:#22a06b;
     }
-    /* 2 宣纸暖白 · light */
+    /* 2 净白 · light */
+    html[data-theme="pure"] {
+      --bg:#f6f7f8; --bg-2:#ffffff; --panel:#ffffff; --panel-2:#f3f4f6;
+      --border:#e4e7eb; --border-2:#cfd4da;
+      --text:#181c20; --text-soft:#5f6873; --text-dim:#98a1ab;
+      --accent:#181c20; --accent-2:#10b981;
+      --accent-soft:rgba(24,28,32,.07); --accent-line:rgba(24,28,32,.22);
+      --ok:#10b981; --warn:#d97706; --danger:#dc2626;
+      --term-bg:#141a20; --log-info:#3f4852; --log-ts:#75808c;
+      --term-rx:#4ade80; --term-tx:#38bdf8; --term-sys:#a8b0ba; --term-trace:#7f8994; --term-hover:rgba(16,185,129,.07);
+      --scroll:#d8dce1; --scroll-h:#bfc5cc; --glow:rgba(24,28,32,.16);
+      --nav-bg:#ffffff;
+      --el-color-primary:#181c20;
+    }
+    /* 3 宣纸暖白 · light */
     html[data-theme="paper"] {
       --bg:#f4efe6; --bg-2:#fffaf3; --panel:#fffaf3; --panel-2:#f7f0e4;
       --border:#e7dcc8; --border-2:#d9cbb0;

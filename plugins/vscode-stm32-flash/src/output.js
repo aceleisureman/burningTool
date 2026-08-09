@@ -6,39 +6,74 @@ function pad2(n) {
   return String(n).padStart(2, '0');
 }
 
-/** HH:mm:ss.SSS */
+/** HH:mm:ss */
 function formatTime(d = new Date()) {
-  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3, '0')}`;
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+}
+
+function parseCategory(text) {
+  const match = /^\[([^\]]+)\]\s*(.*)$/.exec(text);
+  if (!match) return { category: '', message: text };
+  return { category: match[1].trim().toUpperCase(), message: match[2] };
+}
+
+function marker(type) {
+  if (type === 'error') return '✕';
+  if (type === 'success') return '✓';
+  if (type === 'warn') return '!';
+  if (type === 'progress') return '…';
+  return '·';
 }
 
 function createOutput() {
   const channel = vscode.window.createOutputChannel('MCU-Assistant');
-  /** @type {Map<string, number>} */
-  const progressLines = new Map();
+  let openGroup = '';
 
-  function append(text, type = 'info', key) {
+  function closeGroup() {
+    if (!openGroup) return;
+    channel.appendLine('         └─');
+    openGroup = '';
+  }
+
+  function append(text, type = 'info') {
     const line = String(text == null ? '' : text);
     if (!line) return;
-    const mark =
-      type === 'error' ? '✗' :
-      type === 'success' ? '✓' :
-      type === 'warn' ? '⚠' :
-      type === 'step' ? '▶' :
-      type === 'progress' ? '…' : '·';
-    if (type === 'progress' && key) {
-      progressLines.set(key, Date.now());
+    const parsed = parseCategory(line);
+
+    if (parsed.category === 'PIO') {
+      if (openGroup !== 'PIO') {
+        closeGroup();
+        channel.appendLine(`${formatTime()} ┌─ PlatformIO`);
+        openGroup = 'PIO';
+      }
+      const branch = type === 'error' || type === 'warn' || type === 'success' ? '├─' : '│ ';
+      const prefix = type === 'info' ? '' : `${marker(type)} `;
+      channel.appendLine(`         ${branch} ${prefix}${parsed.message}`);
+      return;
     }
-    channel.appendLine(`${formatTime()} ${mark} ${line}`);
-    // 每次 append 后自动滚到底（preserveFocus=true 不抢焦点）
-    channel.show(true);
+
+    closeGroup();
+    if (type === 'step') {
+      const title = parsed.category ? `${parsed.category} · ${parsed.message}` : parsed.message;
+      channel.appendLine('');
+      channel.appendLine(`${formatTime()} ▶ ${title || line}`);
+      channel.appendLine('         ' + '─'.repeat(64));
+      return;
+    }
+
+    const category = parsed.category ? `${parsed.category.padEnd(8)} ` : '';
+    channel.appendLine(`${formatTime()} ${marker(type)} ${category}${parsed.message}`);
   }
 
   return {
     channel,
     append,
     show: (preserveFocus = true) => channel.show(preserveFocus),
-    clear: () => channel.clear()
+    clear: () => {
+      openGroup = '';
+      channel.clear();
+    }
   };
 }
 
-module.exports = { createOutput, formatTime };
+module.exports = { createOutput, formatTime, parseCategory };

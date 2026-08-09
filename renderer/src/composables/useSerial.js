@@ -1,5 +1,69 @@
-import { ref, reactive, computed, watch, nextTick, onMounted } from 'vue';
+import { ref, reactive, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import { portMainLabel, portSubLabel, cmdDelayMs, bytesToHex, hexToBytes, copyText } from '../util.js';
+import { useCommandHistory } from './useCommandHistory.js';
+
+const SERIAL_MAX_WRITE_BYTES = 1024 * 1024;
+const SERIAL_MAX_HEX_INPUT_CHARS = SERIAL_MAX_WRITE_BYTES * 8;
+const SERIAL_MAX_RX_BUFFER_CHARS = 256 * 1024;
+const SERIAL_MAX_LINE_CHARS = 256 * 1024;
+const SERIAL_MAX_HEX_DISPLAY_BYTES = Math.floor((SERIAL_MAX_LINE_CHARS + 1) / 3);
+const SERIAL_MAX_HISTORY_CHARS = 4 * 1024 * 1024;
+const SERIAL_HISTORY_TRIM_CHARS = 3 * 1024 * 1024;
+const SERIAL_MAX_HISTORY_LINES = 3000;
+const SERIAL_HISTORY_TRIM_LINES = 2200;
+
+const QUICK_COMMAND_JSON_EXAMPLE = `[
+  {
+    "name": "基础指令",
+    "cmds": [
+      {
+        "enabled": true,
+        "name": "查询版本",
+        "content": "AT+GMR",
+        "hex": false,
+        "interval": 1000,
+        "unit": "ms"
+      },
+      {
+        "enabled": false,
+        "name": "二进制握手",
+        "content": "AA 55 01 00 FE",
+        "hex": true,
+        "interval": 2,
+        "unit": "s"
+      }
+    ]
+  }
+]`;
+
+const QUICK_COMMAND_FORMAT_FIELDS = [
+  { scope: '分组', name: 'name', type: 'string', required: '是', note: '分组显示名称' },
+  { scope: '分组', name: 'cmds', type: 'array', required: '是', note: '快捷指令数组' },
+  { scope: '指令', name: 'name', type: 'string', required: '是', note: '指令名称或备注' },
+  { scope: '指令', name: 'content', type: 'string', required: '是', note: '文本发送自动追加 CRLF；HEX 填字节' },
+  { scope: '指令', name: 'enabled', type: 'boolean', required: '否', note: '是否加入循环发送，默认 false' },
+  { scope: '指令', name: 'hex', type: 'boolean', required: '否', note: 'true 按 HEX 解析，默认 false' },
+  { scope: '指令', name: 'interval', type: 'number', required: '否', note: '循环间隔数值，默认 1000' },
+  { scope: '指令', name: 'unit', type: 'string', required: '否', note: '间隔单位：ms、s 或 min' }
+];
+
+const QUICK_COMMAND_AI_PROMPT = `请为“MCU 工具箱”的串口快捷指令生成 JSON。
+只输出合法 JSON，不要使用 Markdown 代码块，不要添加解释文字。
+
+格式要求：
+1. 顶层必须是分组数组。
+2. 每个分组包含 name 和 cmds。
+3. 每条指令包含 name、content，可选 enabled、hex、interval、unit。
+4. hex=false 时 content 填文本；程序发送时会自动追加 CRLF。
+5. hex=true 时 content 只填写十六进制字节，例如 "AA 55 01 00 FE"。
+6. unit 只能是 "ms"、"s" 或 "min"。
+7. 不要生成 id 字段。
+
+参考结构：
+${QUICK_COMMAND_JSON_EXAMPLE}
+
+请根据以下设备或协议需求生成：
+`;
 
 // 串口调试（serialport 后端）：枚举/连接/收发 + 快捷指令分组 + 循环发送
 export function useSerial() {
@@ -9,16 +73,35 @@ export function useSerial() {
   const serial = reactive({
     baudRate: 115200, dataBits: 8, parity: 'none', stopBits: 1,
     connected: false, connecting: false, portPath: '', portLabel: '', portSub: '',
+    autoReconnect: false, reconnecting: false, reconnectAttempt: 0, reconnectWait: 0,
     rxHex: false, txHex: false, autoScroll: true, timestamp: true,
     sendText: '', appendNewline: true, tx: 0, rx: 0
   });
   const serialLines = ref([]);
+  const { items: sendHistory, record: recordSendHistory, clear: clearSendHistory } = useCommandHistory(30);
+  let serialLineChars = 0;
   let serialSeq = 0;
   let rxTextBuffer = '';
   let rxFlushTimer = null;
   let rxDecoder = new TextDecoder();
+  let reconnectTimer = null;
+  let reconnectEpoch = 0;
+  let reconnectAttempts = 0;
+  let manualDisconnect = false;
+  const reconnectDelays = [1000, 2000, 4000, 8000];
   const termBox = ref(null);
   const portChooser = reactive({ visible: false, list: [], loading: false });
+  const quickFormatVisible = ref(false);
+  const quickFormatTab = ref('fields');
+  const serialReconnectStatus = computed(() => {
+    if (serial.reconnecting) {
+      return serial.reconnectWait
+        ? `第 ${serial.reconnectAttempt} 次 · ${serial.reconnectWait} 秒后重试`
+        : `第 ${serial.reconnectAttempt} 次 · 正在连接`;
+    }
+    if (serial.autoReconnect) return serial.connected ? '已启用' : '等待连接';
+    return '未启用';
+  });
 
   function normCmd(c) {
     c = c || {};
@@ -43,8 +126,65 @@ export function useSerial() {
   const quickCmds = computed(() => (activeGroup.value ? activeGroup.value.cmds : []));
   const looping = ref(false);
   let loopStop = false;
+  let loopSleepTimer = null;
+  let wakeLoopSleep = null;
 
-  function switchGroup(id) { if (looping.value) { looping.value = false; loopStop = true; } activeGid.value = id; }
+  function stopLooping() {
+    looping.value = false;
+    loopStop = true;
+    if (wakeLoopSleep) wakeLoopSleep();
+  }
+
+  function cancelReconnect(closeOpening = false) {
+    const wasOpening = serial.reconnecting && serial.connecting;
+    reconnectEpoch++;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+    reconnectAttempts = 0;
+    serial.reconnecting = false;
+    serial.reconnectAttempt = 0;
+    serial.reconnectWait = 0;
+    if (closeOpening && wasOpening) window.api.serialClose().catch(() => {});
+  }
+
+  function setAutoReconnect(enabled) {
+    serial.autoReconnect = enabled === true;
+    if (!serial.autoReconnect) cancelReconnect(true);
+    window.api.saveConfig({ serialAutoReconnect: serial.autoReconnect }).catch(() => {});
+  }
+
+  function openQuickFormat() {
+    quickFormatTab.value = 'fields';
+    quickFormatVisible.value = true;
+  }
+
+  async function copyQuickCommandExample() {
+    try { await copyText(QUICK_COMMAND_JSON_EXAMPLE); ElMessage.success('JSON 示例已复制'); }
+    catch { ElMessage.error('复制失败'); }
+  }
+
+  async function copyQuickCommandAiPrompt() {
+    try { await copyText(QUICK_COMMAND_AI_PROMPT); ElMessage.success('AI 提示词已复制'); }
+    catch { ElMessage.error('复制失败'); }
+  }
+
+  function waitLoopDelay(ms) {
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        clearTimeout(loopSleepTimer);
+        loopSleepTimer = null;
+        wakeLoopSleep = null;
+        resolve();
+      };
+      wakeLoopSleep = finish;
+      loopSleepTimer = setTimeout(finish, Math.max(0, ms | 0));
+    });
+  }
+
+  function switchGroup(id) { if (looping.value) stopLooping(); activeGid.value = id; }
   function addGroup() {
     const g = normGroup({ name: '分组' + (cmdGroups.value.length + 1), cmds: [] });
     cmdGroups.value.push(g); activeGid.value = g.id;
@@ -75,8 +215,13 @@ export function useSerial() {
 
   // 持久化到 config.json（防抖）
   let qcSaveT = null;
+  let stopQuickCmdWatch = null;
   function plainGroups() { return cmdGroups.value.map((g) => ({ name: g.name, cmds: g.cmds.map((q) => ({ enabled: q.enabled, name: q.name, content: q.content, hex: q.hex, interval: q.interval, unit: q.unit })) })); }
-  function persistQuickCmds() { clearTimeout(qcSaveT); qcSaveT = setTimeout(() => { window.api.saveConfig({ serialCmdGroups: plainGroups() }).catch(() => {}); }, 400); }
+  function saveQuickCmdsNow() {
+    qcSaveT = null;
+    window.api.saveConfig({ serialCmdGroups: plainGroups() }).catch(() => {});
+  }
+  function persistQuickCmds() { clearTimeout(qcSaveT); qcSaveT = setTimeout(saveQuickCmdsNow, 400); }
   async function exportQuickCmds() {
     try { const r = await window.api.exportQuickCmds(plainGroups()); if (r && r.ok) ElMessage.success('已导出: ' + r.path); else if (r && r.error) ElMessage.error('导出失败: ' + r.error); }
     catch (_e) { ElMessage.error('导出失败'); }
@@ -91,7 +236,7 @@ export function useSerial() {
       else if (d && Array.isArray(d.serialCmdGroups)) groups = d.serialCmdGroups;                  // {serialCmdGroups:[...]}
       else if (Array.isArray(d)) groups = [{ name: '导入', cmds: d }];                             // 旧版扁平指令数组
       else if (d && Array.isArray(d.serialQuickCmds)) groups = [{ name: '导入', cmds: d.serialQuickCmds }];
-      if (!groups) { ElMessage.error('文件格式不对'); return; }
+      if (!groups) { ElMessage.error('文件格式不对，请按 JSON 格式说明生成'); openQuickFormat(); return; }
       cmdGroups.value = groups.map(normGroup);
       if (!cmdGroups.value.length) cmdGroups.value = [normGroup({ name: '默认', cmds: [] })];
       activeGid.value = cmdGroups.value[0].id;
@@ -99,7 +244,6 @@ export function useSerial() {
     } catch (_e) { ElMessage.error('导入失败'); }
   }
 
-  const sleep = (ms) => new Promise((r) => setTimeout(r, Math.max(0, ms | 0)));
   function serialNow() {
     const d = new Date();
     const p = (n, w = 2) => String(n).padStart(w, '0');
@@ -125,8 +269,20 @@ export function useSerial() {
   }
   function pushTermLine(dir, text) {
     // 行对象写入后字段不再变化，用普通对象即可；ref 数组本身负责触发更新
-    serialLines.value.push({ id: ++serialSeq, dir, text: String(text ?? ''), ts: serialNow(), ...serialLineMeta(dir, text) });
-    if (serialLines.value.length > 3000) serialLines.value.splice(0, 800);
+    const raw = String(text ?? '');
+    const clipped = raw.length > SERIAL_MAX_LINE_CHARS ? raw.slice(0, SERIAL_MAX_LINE_CHARS) + '\n… [显示内容已截断]' : raw;
+    serialLines.value.push({ id: ++serialSeq, dir, text: clipped, ts: serialNow(), _weight: clipped.length, ...serialLineMeta(dir, clipped) });
+    serialLineChars += clipped.length;
+    if (serialLines.value.length > SERIAL_MAX_HISTORY_LINES || serialLineChars > SERIAL_MAX_HISTORY_CHARS) {
+      let removeCount = 0;
+      while (serialLines.value.length - removeCount > 1 &&
+             (serialLines.value.length - removeCount > SERIAL_HISTORY_TRIM_LINES || serialLineChars > SERIAL_HISTORY_TRIM_CHARS)) {
+        const old = serialLines.value[removeCount++];
+        serialLineChars -= old && old._weight ? old._weight : 0;
+      }
+      if (removeCount) serialLines.value.splice(0, removeCount);
+      if (serialLineChars < 0) serialLineChars = 0;
+    }
   }
   function addTerm(dir, text) {
     // 系统/发送消息一次性多行时也只滚动一次
@@ -153,6 +309,10 @@ export function useSerial() {
   function addRxText(text) {
     clearTimeout(rxFlushTimer);
     rxTextBuffer += String(text || '').replace(/\r/g, '');
+    while (rxTextBuffer.length > SERIAL_MAX_RX_BUFFER_CHARS) {
+      pushTermLine('rx', rxTextBuffer.slice(0, SERIAL_MAX_RX_BUFFER_CHARS));
+      rxTextBuffer = rxTextBuffer.slice(SERIAL_MAX_RX_BUFFER_CHARS);
+    }
     const parts = rxTextBuffer.split('\n');
     rxTextBuffer = parts.pop() || '';
     for (const line of parts) pushTermLine('rx', line);
@@ -162,9 +322,10 @@ export function useSerial() {
   function resetRxTextState() {
     rxTextBuffer = '';
     clearTimeout(rxFlushTimer);
+    rxFlushTimer = null;
     rxDecoder = new TextDecoder();
   }
-  function clearTerm() { serialLines.value = []; serial.tx = 0; serial.rx = 0; resetRxTextState(); }
+  function clearTerm() { serialLines.value = []; serialLineChars = 0; serial.tx = 0; serial.rx = 0; resetRxTextState(); }
   async function copyTerm() {
     const text = serialLines.value.map((l) => `[${l.ts}] ${l.badge || l.dir.toUpperCase() + '>'} ${l.text}`).join('\n');
     try { await copyText(text); ElMessage.success('已复制'); } catch { ElMessage.error('复制失败'); }
@@ -188,13 +349,15 @@ export function useSerial() {
     finally { portChooser.loading = false; }
   }
   async function selectPort() {
+    cancelReconnect(true);
     addTerm('sys', '正在枚举系统串口…');
     await refreshPorts();
     portChooser.visible = true;
     if (!portChooser.list.length) addTerm('sys', '未检测到任何 COM 串口：请插好 USB 转串口设备并装好驱动（PWLink2 / ST-Link 调试探针不是串口，不会出现在列表里）');
     else addTerm('sys', '检测到 ' + portChooser.list.length + ' 个串口');
   }
-  async function serialConnect() {
+  async function openSerial(isReconnect, epoch) {
+    if (serial.connecting) return false;
     if (!serial.portPath) { ElMessage.warning('请先选择串口'); selectPort(); return; }
     serial.connecting = true;
     try {
@@ -203,23 +366,67 @@ export function useSerial() {
         dataBits: Number(serial.dataBits), stopBits: Number(serial.stopBits), parity: serial.parity
       });
       if (!r || !r.ok) throw new Error((r && r.error) || '打开失败');
+      if (epoch !== reconnectEpoch) return false;
       serial.connected = true;
-      addTerm('sys', `已连接 ${serial.portPath} · ${serial.baudRate} ${serial.dataBits}${serial.parity[0].toUpperCase()}${serial.stopBits}`);
+      serial.reconnecting = false;
+      serial.reconnectAttempt = 0;
+      serial.reconnectWait = 0;
+      reconnectAttempts = 0;
+      addTerm('sys', `${isReconnect ? '已自动重连' : '已连接'} ${serial.portPath} · ${serial.baudRate} ${serial.dataBits}${serial.parity[0].toUpperCase()}${serial.stopBits}`);
+      return true;
     } catch (e) {
-      addTerm('sys', '连接失败: ' + (e.message || e)); ElMessage.error('连接失败: ' + (e.message || e));
+      addTerm('sys', (isReconnect ? '自动重连失败: ' : '连接失败: ') + (e.message || e));
+      if (!isReconnect) ElMessage.error('连接失败: ' + (e.message || e));
+      return false;
     } finally {
       serial.connecting = false;
     }
   }
+
+  function scheduleReconnect() {
+    if (!serial.autoReconnect || manualDisconnect || serial.connected || serial.connecting || reconnectTimer || !serial.portPath) return;
+    const epoch = reconnectEpoch;
+    const delay = reconnectDelays[Math.min(reconnectAttempts, reconnectDelays.length - 1)];
+    serial.reconnecting = true;
+    serial.reconnectAttempt = reconnectAttempts + 1;
+    serial.reconnectWait = Math.ceil(delay / 1000);
+    addTerm('sys', `将在 ${serial.reconnectWait} 秒后进行第 ${serial.reconnectAttempt} 次自动重连`);
+    reconnectTimer = setTimeout(async () => {
+      reconnectTimer = null;
+      if (epoch !== reconnectEpoch || !serial.autoReconnect || manualDisconnect) return;
+      serial.reconnectWait = 0;
+      reconnectAttempts++;
+      const ok = await openSerial(true, epoch);
+      if (!ok && epoch === reconnectEpoch && serial.autoReconnect && !manualDisconnect) scheduleReconnect();
+    }, delay);
+  }
+
+  async function serialConnect() {
+    const keepRetrying = serial.reconnecting && serial.autoReconnect;
+    cancelReconnect(true);
+    const epoch = reconnectEpoch;
+    if (keepRetrying) {
+      serial.reconnecting = true;
+      serial.reconnectAttempt = 1;
+      reconnectAttempts = 1;
+    }
+    const ok = await openSerial(keepRetrying, epoch);
+    if (!ok && keepRetrying && epoch === reconnectEpoch && serial.autoReconnect) scheduleReconnect();
+    return ok;
+  }
   async function serialDisconnect() {
-    looping.value = false; loopStop = true;
+    manualDisconnect = true;
+    cancelReconnect(false);
+    stopLooping();
     try { await window.api.serialClose(); } catch {}
     serial.connected = false;
     resetRxTextState();
     addTerm('sys', '已断开连接');
+    manualDisconnect = false;
   }
   async function writeBytes(u8) {
-    const r = await window.api.serialWrite(Array.from(u8));
+    if (!u8 || u8.byteLength > SERIAL_MAX_WRITE_BYTES) throw new Error(`单次写入不能超过 ${SERIAL_MAX_WRITE_BYTES} 字节`);
+    const r = await window.api.serialWrite(u8);
     if (!r || !r.ok) throw new Error((r && r.error) || '写入失败');
   }
   // 回车发送，Shift+Enter 换行
@@ -234,24 +441,43 @@ export function useSerial() {
     if (!raw) return;
     try {
       let bytes;
-      if (serial.txHex) { bytes = hexToBytes(raw); addTerm('tx', bytesToHex(bytes)); }
-      else { let s = raw; if (serial.appendNewline) s += '\r\n'; bytes = new TextEncoder().encode(s); addTerm('tx', raw); }
-      await writeBytes(bytes); serial.tx += bytes.length; serial.sendText = '';
+      let shown;
+      if (serial.txHex) {
+        if (raw.length > SERIAL_MAX_HEX_INPUT_CHARS) throw new Error('HEX 输入过长');
+        bytes = hexToBytes(raw);
+        const displayBytes = bytes.length > SERIAL_MAX_HEX_DISPLAY_BYTES ? bytes.subarray(0, SERIAL_MAX_HEX_DISPLAY_BYTES) : bytes;
+        shown = bytesToHex(displayBytes) + (displayBytes.length < bytes.length ? '\n… [显示内容已截断]' : '');
+      }
+      else {
+        if (raw.length > SERIAL_MAX_WRITE_BYTES) throw new Error(`单次写入不能超过 ${SERIAL_MAX_WRITE_BYTES} 字节`);
+        let s = raw; if (serial.appendNewline) s += '\r\n'; bytes = new TextEncoder().encode(s); shown = raw;
+      }
+      await writeBytes(bytes);
+      addTerm('tx', shown); serial.tx += bytes.length; recordSendHistory(raw, serial.txHex);
     } catch (e) { addTerm('sys', '发送失败: ' + (e.message || e)); ElMessage.error(e.message || '发送失败'); }
   }
   async function sendQuickCmd(q) {
     if (!serial.connected || !q.content) return;
     try {
       let bytes;
-      if (q.hex) { bytes = hexToBytes(q.content); addTerm('tx', bytesToHex(bytes)); }
-      else { bytes = new TextEncoder().encode(q.content + '\r\n'); addTerm('tx', q.content); }
-      await writeBytes(bytes); serial.tx += bytes.length;
+      let shown;
+      if (q.hex) {
+        if (String(q.content || '').length > SERIAL_MAX_HEX_INPUT_CHARS) throw new Error('HEX 输入过长');
+        bytes = hexToBytes(q.content);
+        const displayBytes = bytes.length > SERIAL_MAX_HEX_DISPLAY_BYTES ? bytes.subarray(0, SERIAL_MAX_HEX_DISPLAY_BYTES) : bytes;
+        shown = bytesToHex(displayBytes) + (displayBytes.length < bytes.length ? '\n… [显示内容已截断]' : '');
+      }
+      else {
+        if (String(q.content).length > SERIAL_MAX_WRITE_BYTES) throw new Error(`单次写入不能超过 ${SERIAL_MAX_WRITE_BYTES} 字节`);
+        bytes = new TextEncoder().encode(q.content + '\r\n'); shown = q.content;
+      }
+      await writeBytes(bytes); addTerm('tx', shown); serial.tx += bytes.length;
     } catch (e) { addTerm('sys', '发送失败: ' + (e.message || e)); }
   }
   function addQuickCmd() { quickCmds.value.push(normCmd({})); }
   function delQuickCmd(i) { quickCmds.value.splice(i, 1); }
   async function toggleLoop() {
-    if (looping.value) { looping.value = false; loopStop = true; return; }
+    if (looping.value) { stopLooping(); return; }
     const enabled = quickCmds.value.filter((q) => q.enabled && q.content);
     if (!enabled.length) { ElMessage.warning('请先勾选要循环发送的指令'); return; }
     looping.value = true; loopStop = false;
@@ -261,7 +487,8 @@ export function useSerial() {
         if (loopStop || !serial.connected) break;
         if (!q.enabled || !q.content) continue;
         await sendQuickCmd(q);
-        await sleep(cmdDelayMs(q) || 1000);
+        if (loopStop || !serial.connected) break;
+        await waitLoopDelay(cmdDelayMs(q) || 1000);
       }
     }
     looping.value = false;
@@ -269,6 +496,7 @@ export function useSerial() {
   }
   function pickPort(p) {
     if (!p || !p.path) return;
+    cancelReconnect(true);
     serial.portPath = p.path;
     serial.portLabel = portMainLabel(p);
     serial.portSub = portSubLabel(p);
@@ -279,29 +507,62 @@ export function useSerial() {
 
   // 由 loadConfig 在读取配置后调用：恢复快捷指令分组并开启持久化
   function initFromConfig(cfg) {
+    serial.autoReconnect = cfg.serialAutoReconnect === true;
     if (Array.isArray(cfg.serialCmdGroups) && cfg.serialCmdGroups.length) cmdGroups.value = cfg.serialCmdGroups.map(normGroup);
     else if (Array.isArray(cfg.serialQuickCmds) && cfg.serialQuickCmds.length) cmdGroups.value = [normGroup({ name: '默认', cmds: cfg.serialQuickCmds })];
     activeGid.value = cmdGroups.value[0].id;
-    watch(cmdGroups, persistQuickCmds, { deep: true });
+    if (typeof stopQuickCmdWatch === 'function') stopQuickCmdWatch();
+    stopQuickCmdWatch = watch(cmdGroups, persistQuickCmds, { deep: true });
   }
 
+  const serialEventOffs = [];
   onMounted(() => {
     // 串口数据/关闭/错误（serialport 后端推送，主进程已按 30ms 攒批合并）
-    window.api.onSerialData((arr) => {
+    const offData = window.api.onSerialData((arr) => {
       const u8 = arr instanceof Uint8Array ? arr : Uint8Array.from(arr || []);
       if (!u8.length) return;
       serial.rx += u8.length;
       if (serial.rxHex) addTerm('rx', bytesToHex(u8));
       else addRxText(rxDecoder.decode(u8, { stream: true }));
     });
-    window.api.onSerialClosed(() => { if (serial.connected) { serial.connected = false; looping.value = false; loopStop = true; resetRxTextState(); addTerm('sys', '串口已关闭/掉线'); } });
-    window.api.onSerialError((msg) => { addTerm('sys', '串口错误: ' + msg); });
+    const offClosed = window.api.onSerialClosed(() => {
+      const wasActive = serial.connected || serial.connecting;
+      serial.connected = false;
+      serial.connecting = false;
+      if (!wasActive) return;
+      stopLooping();
+      resetRxTextState();
+      addTerm('sys', '串口已关闭/掉线');
+      reconnectEpoch++;
+      if (serial.autoReconnect && !manualDisconnect) {
+        reconnectAttempts = 0;
+        scheduleReconnect();
+      }
+    });
+    const offError = window.api.onSerialError((msg) => { addTerm('sys', '串口错误: ' + msg); });
+    for (const off of [offData, offClosed, offError]) if (typeof off === 'function') serialEventOffs.push(off);
+  });
+
+  onBeforeUnmount(() => {
+    for (const off of serialEventOffs.splice(0)) { try { off(); } catch {} }
+    cancelReconnect(true);
+    stopLooping();
+    resetRxTextState();
+    if (qcSaveT) {
+      clearTimeout(qcSaveT);
+      saveQuickCmdsNow();
+    }
+    if (typeof stopQuickCmdWatch === 'function') stopQuickCmdWatch();
+    stopQuickCmdWatch = null;
   });
 
   return {
-    serialSupported, serialErrMsg, baudRates, serial, serialLines, termBox, portChooser,
-    refreshPorts, portMainLabel, portSubLabel, quickCmds, looping,
-    serialConnect, serialDisconnect, serialSend, onSendKey, clearTerm, copyTerm, sendQuickCmd, addQuickCmd, delQuickCmd, toggleLoop, pickPort, cancelPortChoose, selectPort, exportQuickCmds, importQuickCmds,
+    serialSupported, serialErrMsg, baudRates, serial, serialReconnectStatus, serialLines, termBox, portChooser,
+    quickFormatVisible, quickFormatTab, quickCommandFormatFields: QUICK_COMMAND_FORMAT_FIELDS,
+    quickCommandJsonExample: QUICK_COMMAND_JSON_EXAMPLE, quickCommandAiPrompt: QUICK_COMMAND_AI_PROMPT,
+    refreshPorts, portMainLabel, portSubLabel, quickCmds, looping, sendHistory, clearSendHistory,
+    serialConnect, serialDisconnect, setAutoReconnect, serialSend, onSendKey, clearTerm, copyTerm, sendQuickCmd, addQuickCmd, delQuickCmd, toggleLoop, pickPort, cancelPortChoose, selectPort, exportQuickCmds, importQuickCmds,
+    openQuickFormat, copyQuickCommandExample, copyQuickCommandAiPrompt,
     cmdGroups, activeGid, switchGroup, addGroup, delGroup,
     editingGid, editName, startRename, commitRename, cancelRename,
     initFromConfig

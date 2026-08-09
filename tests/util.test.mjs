@@ -34,6 +34,8 @@ test('fmtPayload：HEX 原样、合法 JSON 美化、普通文本原样', () => 
   assert.deepStrictEqual(U.fmtPayload('hello', false), { text: 'hello', json: false });
   // 形似 JSON 但非法 → 原样、不标记 json
   assert.deepStrictEqual(U.fmtPayload('{bad}', false), { text: '{bad}', json: false });
+  // 大消息可跳过 JSON.parse/格式化，避免渲染端瞬时内存放大
+  assert.deepStrictEqual(U.fmtPayload('{"a":1}', false, 4), { text: '{"a":1}', json: false });
 });
 
 test('topicMatch 支持 + 单级与 # 多级通配', () => {

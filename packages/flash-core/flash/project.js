@@ -11,9 +11,10 @@ function findKeilProject(projectDir) {
   if (!projectDir || !fs.existsSync(projectDir)) return null;
   const maxDepth = 4;
   const queue = [{ dir: projectDir, d: 0 }];
+  let queueHead = 0;
   let fallbackUvproj = null;
-  while (queue.length) {
-    const { dir, d } = queue.shift();
+  while (queueHead < queue.length) {
+    const { dir, d } = queue[queueHead++];
     let entries;
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
     const x = entries.find((e) => e.isFile() && e.name.toLowerCase().endsWith('.uvprojx'));
@@ -37,8 +38,9 @@ function findIocFile(projectDir) {
   if (!projectDir || !fs.existsSync(projectDir)) return null;
   const maxDepth = 3;
   const queue = [{ dir: projectDir, d: 0 }];
-  while (queue.length) {
-    const { dir, d } = queue.shift();
+  let queueHead = 0;
+  while (queueHead < queue.length) {
+    const { dir, d } = queue[queueHead++];
     let entries;
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
     const ioc = entries.find((e) => e.isFile() && e.name.toLowerCase().endsWith('.ioc'));

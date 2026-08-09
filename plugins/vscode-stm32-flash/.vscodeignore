@@ -3,3 +3,5 @@
 **/*.map
 .gitignore
 **/tsconfig.json
+eslint.config.mjs
+scripts/**

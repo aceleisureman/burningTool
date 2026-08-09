@@ -10,6 +10,13 @@ export const THEME_PRESETS = [
     swatches: ['#eef3ee', '#ffffff', '#22a06b', '#0ea5a3']
   },
   {
+    id: 'pure',
+    name: '净白',
+    mode: 'light',
+    desc: '极简白 + 墨黑主键，生机绿状态',
+    swatches: ['#ffffff', '#f4f5f6', '#181c20', '#10b981']
+  },
+  {
     id: 'paper',
     name: '宣纸暖白',
     mode: 'light',

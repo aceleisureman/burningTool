@@ -87,7 +87,7 @@ class Keil5Platform extends PlatformBase {
       ok: false, online: false, detail: '', path: keil.path, probes: []
     };
 
-    if (!keil.path || !keil.exists) {
+    if (!compiler.ok) {
       flasher.detail = compiler.detail || '未找到 UV4.exe';
     } else {
       flasher.ok = true;

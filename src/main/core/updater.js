@@ -13,20 +13,29 @@ const { app, dialog, BrowserWindow, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
-const http = require('http');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 const bus = require('./bus');
-
-const OWNER = 'aceleisureman';
-const REPO = 'burningTool';
+const { loadConfig } = require('./config');
+const {
+  OWNER,
+  REPO,
+  OFFICIAL_LATEST_DOWNLOAD_URL,
+  officialUpdateSource,
+  resolveConfiguredUpdateSource,
+  resolveSecureUpdateUrl,
+  getArtifactFileName,
+  officialReleaseAssetUrl
+} = require('./update-source');
 
 let autoUpdater = null;
-let state = { status: 'idle', version: null, percent: 0, error: null, platform: process.platform, mode: null };
+let state = { status: 'idle', version: null, percent: 0, error: null, platform: process.platform, mode: null, source: null };
 let installing = false;
 let forceExitTimer = null;
 let promptShownForVersion = null;
 let lastErrorAt = 0;
+let activeUpdateSource = officialUpdateSource();
+let suppressUpdaterErrors = false;
 // mac 自管更新：已下载的 zip 与解析到的更新信息
 let macPending = null; // { version, zipPath, sha512, fileName, url }
 
@@ -69,21 +78,26 @@ function normalizeUpdateError(err) {
   if (isSignatureError(raw)) {
     return raw + '（当前构建未启用 Apple 代码签名；macOS 将改用本地 zip 替换安装，不再走 ShipIt）';
   }
-  if (/ENOENT|latest-mac\.yml|Cannot find channel/i.test(raw)) {
-    return raw + '（未找到 mac 更新清单 latest-mac.yml，请确认 CI 已发布 zip 产物）';
+  if (/ENOENT|latest(?:-[a-z0-9-]+)?\.yml|Cannot find channel|ERR_UPDATER_CHANNEL_FILE_NOT_FOUND/i.test(raw)) {
+    return raw + '（更新源缺少平台清单或发布文件；自定义镜像需要同步 latest*.yml 与安装包，并建议同步差分更新所需的 blockmap）';
   }
   if (/ECONNRESET|ETIMEDOUT|ENOTFOUND|net::|403|429|rate limit/i.test(raw)) {
-    return raw + '（网络访问 GitHub 失败，可稍后重试或检查代理）';
+    return raw + '（更新源访问失败，可稍后重试或检查应用更新镜像配置）';
   }
   return raw;
 }
 
 /* ── 通用：下载 / 请求 ─────────────────────────────────── */
-function requestText(url, redirects = 0) {
+function requestText(inputUrl, redirects = 0) {
+  let url;
+  try {
+    url = resolveSecureUpdateUrl(OFFICIAL_LATEST_DOWNLOAD_URL, inputUrl, '更新清单地址');
+  } catch (e) {
+    return Promise.reject(e);
+  }
   return new Promise((resolve, reject) => {
     if (redirects > 8) return reject(new Error('too many redirects'));
-    const lib = url.startsWith('https:') ? https : http;
-    const req = lib.get(url, {
+    const req = https.get(url, {
       headers: {
         'User-Agent': 'MCUToolbox-Updater',
         Accept: 'application/octet-stream, text/yaml, */*'
@@ -92,7 +106,9 @@ function requestText(url, redirects = 0) {
     }, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         res.resume();
-        const next = new URL(res.headers.location, url).toString();
+        let next;
+        try { next = resolveSecureUpdateUrl(url, res.headers.location, '更新重定向地址'); }
+        catch (e) { return reject(e); }
         return resolve(requestText(next, redirects + 1));
       }
       if (res.statusCode !== 200) {
@@ -109,11 +125,19 @@ function requestText(url, redirects = 0) {
   });
 }
 
-function downloadFile(url, dest, onProgress, redirects = 0) {
+function downloadFile(inputUrl, dest, onProgress, redirects = 0) {
+  let url;
+  try {
+    url = resolveSecureUpdateUrl(OFFICIAL_LATEST_DOWNLOAD_URL, inputUrl, '更新包地址');
+  } catch (e) {
+    return Promise.reject(e);
+  }
+  const tmp = dest + '.part';
+  const cleanupTmp = () => { try { fs.unlinkSync(tmp); } catch {} };
+  cleanupTmp();
   return new Promise((resolve, reject) => {
     if (redirects > 8) return reject(new Error('too many redirects'));
-    const lib = url.startsWith('https:') ? https : http;
-    const req = lib.get(url, {
+    const req = https.get(url, {
       headers: {
         'User-Agent': 'MCUToolbox-Updater',
         Accept: 'application/octet-stream, */*'
@@ -122,7 +146,9 @@ function downloadFile(url, dest, onProgress, redirects = 0) {
     }, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         res.resume();
-        const next = new URL(res.headers.location, url).toString();
+        let next;
+        try { next = resolveSecureUpdateUrl(url, res.headers.location, '更新重定向地址'); }
+        catch (e) { return reject(e); }
         return resolve(downloadFile(next, dest, onProgress, redirects + 1));
       }
       if (res.statusCode !== 200) {
@@ -133,7 +159,6 @@ function downloadFile(url, dest, onProgress, redirects = 0) {
       const total = parseInt(res.headers['content-length'] || '0', 10) || 0;
       let received = 0;
       let lastPct = -1;
-      const tmp = dest + '.part';
       const out = fs.createWriteStream(tmp);
       res.on('data', (chunk) => {
         received += chunk.length;
@@ -149,24 +174,30 @@ function downloadFile(url, dest, onProgress, redirects = 0) {
       out.on('finish', () => {
         out.close(() => {
           try {
+            try { fs.unlinkSync(dest); } catch {}
             fs.renameSync(tmp, dest);
-            resolve({ path: dest, size: received });
+            resolve({ path: dest, size: received, url });
           } catch (e) {
+            cleanupTmp();
             reject(e);
           }
         });
       });
       out.on('error', (e) => {
-        try { fs.unlinkSync(tmp); } catch {}
+        cleanupTmp();
         reject(e);
       });
       res.on('error', (e) => {
-        try { fs.unlinkSync(tmp); } catch {}
+        cleanupTmp();
         reject(e);
+      });
+      res.on('aborted', () => {
+        cleanupTmp();
+        reject(new Error('download aborted'));
       });
     });
     req.on('timeout', () => { req.destroy(new Error('download timeout')); });
-    req.on('error', reject);
+    req.on('error', (e) => { cleanupTmp(); reject(e); });
   });
 }
 
@@ -252,24 +283,36 @@ function isNewerVersion(remote, local) {
   return false;
 }
 
-function pickMacZipFile(yml) {
+function isZipReference(value) {
+  try {
+    return /\.zip$/i.test(new URL(String(value || ''), OFFICIAL_LATEST_DOWNLOAD_URL).pathname);
+  } catch {
+    return false;
+  }
+}
+
+function pickMacZipFile(yml, source) {
   const files = Array.isArray(yml.files) ? yml.files : [];
   const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
   const names = files.map((f) => f.url || f.path || '').filter(Boolean);
   // 优先：匹配当前 arch 的 zip → universal → path 字段 → 任意 zip
   const prefer = [
-    names.find((n) => /\.zip$/i.test(n) && n.includes(arch)),
-    names.find((n) => /\.zip$/i.test(n) && /universal/i.test(n)),
-    (yml.path && /\.zip$/i.test(yml.path) ? yml.path : null),
-    names.find((n) => /\.zip$/i.test(n))
+    names.find((n) => isZipReference(n) && n.includes(arch)),
+    names.find((n) => isZipReference(n) && /universal/i.test(n)),
+    (yml.path && isZipReference(yml.path) ? yml.path : null),
+    names.find((n) => isZipReference(n))
   ].filter(Boolean);
   const chosen = prefer[0];
   if (!chosen) return null;
   const meta = files.find((f) => (f.url || f.path) === chosen) || {};
+  const fileName = getArtifactFileName(chosen);
   return {
-    fileName: chosen,
+    reference: chosen,
+    fileName,
     sha512: meta.sha512 || yml.sha512 || null,
-    url: 'https://github.com/' + OWNER + '/' + REPO + '/releases/download/v' + yml.version + '/' + chosen
+    url: source.provider === 'generic'
+      ? resolveSecureUpdateUrl(source.feedUrl, chosen, 'macOS 更新包地址')
+      : officialReleaseAssetUrl(yml.version, chosen)
   };
 }
 
@@ -305,28 +348,94 @@ function isRunningFromDmg() {
 }
 
 /* ── macOS 自管更新（绕过 ShipIt）─────────────────────── */
-async function macCheckAndDownload() {
-  setState({ status: 'checking', error: null, mode: 'mac-manual' });
-  const ymlUrl = 'https://github.com/' + OWNER + '/' + REPO + '/releases/latest/download/latest-mac.yml';
-  let text;
+function configuredUpdateSource() {
   try {
-    text = await requestText(ymlUrl);
+    return resolveConfiguredUpdateSource(loadConfig());
   } catch (e) {
-    // 备用：带 v 的 latest 不可用时走 API 拿最新 release 的 latest-mac.yml 地址
-    throw new Error('获取 latest-mac.yml 失败: ' + (e && e.message ? e.message : e));
+    bus.send('[更新] 应用更新镜像配置无效，将使用 GitHub 官方源：' + (e && e.message ? e.message : e), 'warn');
+    return officialUpdateSource({ fallback: true });
   }
+}
+
+async function loadMacUpdateInfo(source) {
+  const ymlUrl = resolveSecureUpdateUrl(source.feedUrl, 'latest-mac.yml', 'macOS 更新清单地址');
+  const text = await requestText(ymlUrl);
   const yml = parseLatestYml(text);
   if (!yml.version) throw new Error('latest-mac.yml 缺少 version');
+  return { yml, source };
+}
+
+async function loadMacUpdateInfoWithFallback() {
+  const preferred = configuredUpdateSource();
+  try {
+    return await loadMacUpdateInfo(preferred);
+  } catch (mirrorError) {
+    if (preferred.provider !== 'generic') throw mirrorError;
+    const fallback = officialUpdateSource({ fallback: true });
+    bus.send('[更新] 自定义镜像清单不可用，回退 GitHub 官方源：' + (mirrorError && mirrorError.message ? mirrorError.message : mirrorError), 'warn');
+    try {
+      return await loadMacUpdateInfo(fallback);
+    } catch (officialError) {
+      throw new Error(
+        '更新镜像失败：' + (mirrorError && mirrorError.message ? mirrorError.message : mirrorError) +
+        '；GitHub 官方源也失败：' + (officialError && officialError.message ? officialError.message : officialError)
+      );
+    }
+  }
+}
+
+async function downloadAndVerifyMacPackage(url, dest, sha512, onProgress) {
+  const result = await downloadFile(url, dest, onProgress);
+  const got = await sha512File(dest);
+  if (got !== sha512) {
+    try { fs.unlinkSync(dest); } catch {}
+    throw new Error('更新包校验失败（sha512 不匹配）');
+  }
+  return result;
+}
+
+async function macCheckAndDownload() {
+  setState({ status: 'checking', error: null, mode: 'mac-manual' });
+  let resolved;
+  try {
+    resolved = await loadMacUpdateInfoWithFallback();
+  } catch (e) {
+    throw new Error('获取 latest-mac.yml 失败: ' + (e && e.message ? e.message : e));
+  }
+  let { yml, source } = resolved;
   const current = app.getVersion();
   if (!isNewerVersion(yml.version, current)) {
-    setState({ status: 'latest', version: yml.version, percent: 0, error: null, mode: 'mac-manual' });
+    setState({ status: 'latest', version: yml.version, percent: 0, error: null, mode: 'mac-manual', source: source.kind });
     return { ok: true, update: false, version: yml.version, state: getState() };
   }
-  const zip = pickMacZipFile(yml);
-  if (!zip) throw new Error('latest-mac.yml 中未找到 zip 更新包');
+  let zip;
+  try {
+    zip = pickMacZipFile(yml, source);
+    if (!zip) throw new Error('latest-mac.yml 中未找到 zip 更新包');
+    if (!zip.sha512) throw new Error('latest-mac.yml 中的 zip 更新包缺少 sha512');
+  } catch (mirrorMetadataError) {
+    if (source.provider !== 'generic') throw mirrorMetadataError;
+    const fallback = officialUpdateSource({ fallback: true });
+    bus.send('[更新] 自定义镜像清单不完整，回退 GitHub 官方源：' + (mirrorMetadataError && mirrorMetadataError.message ? mirrorMetadataError.message : mirrorMetadataError), 'warn');
+    try {
+      ({ yml, source } = await loadMacUpdateInfo(fallback));
+      if (!isNewerVersion(yml.version, current)) {
+        setState({ status: 'latest', version: yml.version, percent: 0, error: null, mode: 'mac-manual', source: source.kind });
+        return { ok: true, update: false, version: yml.version, state: getState() };
+      }
+      zip = pickMacZipFile(yml, source);
+      if (!zip) throw new Error('latest-mac.yml 中未找到 zip 更新包');
+      if (!zip.sha512) throw new Error('latest-mac.yml 中的 zip 更新包缺少 sha512');
+    } catch (officialError) {
+      throw new Error(
+        '更新镜像清单无效：' + (mirrorMetadataError && mirrorMetadataError.message ? mirrorMetadataError.message : mirrorMetadataError) +
+        '；GitHub 官方源也失败：' + (officialError && officialError.message ? officialError.message : officialError)
+      );
+    }
+  }
 
-  setState({ status: 'downloading', version: yml.version, percent: 0, error: null, mode: 'mac-manual' });
-  bus.send('发现新版本 v' + yml.version + '，正在后台下载（mac 自管，绕过 ShipIt）…', 'info');
+  setState({ status: 'downloading', version: yml.version, percent: 0, error: null, mode: 'mac-manual', source: source.kind });
+  bus.send('发现新版本 v' + yml.version + '，正在通过' + source.label + '后台下载（mac 自管，绕过 ShipIt）…', 'info');
 
   const dest = path.join(macUpdateDir(), zip.fileName);
   // 若已有同版本文件且 sha 匹配，跳过下载
@@ -337,17 +446,32 @@ async function macCheckAndDownload() {
       if (got === zip.sha512) needDownload = false;
     } catch {}
   }
+  if (needDownload && fs.existsSync(dest)) {
+    try { fs.unlinkSync(dest); } catch {}
+  }
+  let downloadedUrl = zip.url;
+  let downloadedSource = source.kind;
   if (needDownload) {
-    await downloadFile(zip.url, dest, (pct) => {
+    const onProgress = (pct) => {
       if (state.status === 'downloading' && state.percent === pct) return;
-      setState({ status: 'downloading', version: yml.version, percent: pct, mode: 'mac-manual' });
+      setState({ status: 'downloading', version: yml.version, percent: pct, mode: 'mac-manual', source: downloadedSource });
       bus.sendProgress('app-update', '下载更新 v' + yml.version + ': ' + pct + '%');
-    });
-    if (zip.sha512) {
-      const got = await sha512File(dest);
-      if (got !== zip.sha512) {
-        try { fs.unlinkSync(dest); } catch {}
-        throw new Error('更新包校验失败（sha512 不匹配）');
+    };
+    try {
+      await downloadAndVerifyMacPackage(zip.url, dest, zip.sha512, onProgress);
+    } catch (mirrorError) {
+      if (source.provider !== 'generic') throw mirrorError;
+      downloadedUrl = officialReleaseAssetUrl(yml.version, zip.reference);
+      downloadedSource = 'github-fallback';
+      setState({ status: 'downloading', version: yml.version, percent: 0, error: null, mode: 'mac-manual', source: downloadedSource });
+      bus.send('[更新] 镜像更新包下载或校验失败，回退 GitHub 官方源：' + (mirrorError && mirrorError.message ? mirrorError.message : mirrorError), 'warn');
+      try {
+        await downloadAndVerifyMacPackage(downloadedUrl, dest, zip.sha512, onProgress);
+      } catch (officialError) {
+        throw new Error(
+          '更新镜像下载失败：' + (mirrorError && mirrorError.message ? mirrorError.message : mirrorError) +
+          '；GitHub 官方源也失败：' + (officialError && officialError.message ? officialError.message : officialError)
+        );
       }
     }
   }
@@ -357,9 +481,9 @@ async function macCheckAndDownload() {
     zipPath: dest,
     sha512: zip.sha512,
     fileName: zip.fileName,
-    url: zip.url
+    url: downloadedUrl
   };
-  setState({ status: 'downloaded', version: yml.version, percent: 100, error: null, mode: 'mac-manual' });
+  setState({ status: 'downloaded', version: yml.version, percent: 100, error: null, mode: 'mac-manual', source: downloadedSource });
   bus.send('新版本 v' + yml.version + ' 已下载完成', 'success');
   await maybePromptInstall(yml.version);
   return { ok: true, update: true, version: yml.version, state: getState() };
@@ -504,12 +628,14 @@ async function macQuitAndInstall() {
     const launched = launchMacManualInstaller(macPending.zipPath, appBundle);
     bus.send('[更新] 已启动替换脚本: ' + launched.scriptPath, 'info');
     scheduleForceExit(8000);
+    try { app.updateQuitPrepared = true; } catch {}
     // 正常退出，脚本等待 PID 结束后替换
     setTimeout(() => {
       try { app.quit(); } catch {}
     }, 300);
     return { ok: true, state: getState(), summary, mode: 'mac-manual', logFile: launched.logFile };
   } catch (err) {
+    try { app.updateQuitPrepared = false; } catch {}
     installing = false;
     const msg = normalizeUpdateError(err);
     setState({ status: 'downloaded', error: msg, mode: 'mac-manual' });
@@ -519,10 +645,27 @@ async function macQuitAndInstall() {
 }
 
 /* ── Windows/Linux：electron-updater ─────────────────── */
+function configureUpdaterSource(u, source) {
+  if (source.provider === 'generic') {
+    u.setFeedURL({
+      provider: 'generic',
+      url: source.feedUrl,
+      // 国内 CDN / GitHub 代理对 multipart range 的兼容性差异较大，
+      // 禁用多区间合并请求，仍保留普通 Range 与差分更新能力。
+      useMultipleRangeRequest: false
+    });
+  } else {
+    u.setFeedURL({ provider: 'github', owner: OWNER, repo: REPO, releaseType: 'release' });
+  }
+  activeUpdateSource = source;
+  return source;
+}
+
 function getUpdater() {
   if (!autoUpdater) {
     ({ autoUpdater } = require('electron-updater'));
-    autoUpdater.autoDownload = true;
+    // 由 checkNow 显式等待下载，便于镜像在清单或安装包失败时完整回退官方源。
+    autoUpdater.autoDownload = false;
     autoUpdater.autoInstallOnAppQuit = true;
     if (typeof autoUpdater.verifyUpdateCodeSignature === 'boolean' || 'verifyUpdateCodeSignature' in autoUpdater) {
       autoUpdater.verifyUpdateCodeSignature = false;
@@ -542,31 +685,33 @@ function getUpdater() {
 
 function wireEvents(u) {
   u.on('checking-for-update', () => {
-    if (!installing) setState({ status: 'checking', error: null, mode: 'electron-updater' });
+    if (!installing) setState({ status: 'checking', error: null, mode: 'electron-updater', source: activeUpdateSource.kind });
   });
   u.on('update-available', (info) => {
     if (installing) return;
-    setState({ status: 'downloading', version: info.version, percent: 0, error: null, mode: 'electron-updater' });
-    bus.send('发现新版本 v' + info.version + '，正在后台下载…', 'info');
+    setState({ status: 'downloading', version: info.version, percent: 0, error: null, mode: 'electron-updater', source: activeUpdateSource.kind });
+    bus.send('发现新版本 v' + info.version + '，正在通过' + activeUpdateSource.label + '后台下载…', 'info');
   });
   u.on('update-not-available', () => {
-    if (!installing) setState({ status: 'latest', error: null, mode: 'electron-updater' });
+    if (!installing) setState({ status: 'latest', error: null, mode: 'electron-updater', source: activeUpdateSource.kind });
   });
   u.on('download-progress', (p) => {
     if (installing) return;
     const percent = Math.round((p && p.percent) || 0);
     if (state.status === 'downloading' && state.percent === percent) return;
-    setState({ status: 'downloading', percent, mode: 'electron-updater' });
+    setState({ status: 'downloading', percent, mode: 'electron-updater', source: activeUpdateSource.kind });
     bus.sendProgress('app-update', '下载更新 v' + (state.version || '') + ': ' + percent + '%');
   });
   u.on('update-downloaded', async (info) => {
     if (installing) return;
     const version = info && info.version ? info.version : state.version;
-    setState({ status: 'downloaded', version, percent: 100, error: null, mode: 'electron-updater' });
+    setState({ status: 'downloaded', version, percent: 100, error: null, mode: 'electron-updater', source: activeUpdateSource.kind });
     bus.send('新版本 v' + version + ' 已下载完成', 'success');
     await maybePromptInstall(version);
   });
   u.on('error', (err) => {
+    // checkNow 会捕获当前尝试并在镜像失败时切到官方源，避免界面先闪现一次错误状态。
+    if (suppressUpdaterErrors) return;
     // mac 上若误走 electron-updater 并撞上 ShipIt 签名错误，自动切自管通道
     if (isMac() && isSignatureError(err)) {
       bus.send('[更新] 检测到 ShipIt 签名校验失败，切换到 mac 自管更新通道…', 'warn');
@@ -587,6 +732,42 @@ function wireEvents(u) {
       bus.send('检查/下载更新失败: ' + msg, 'warn');
     }
   });
+}
+
+async function runUpdaterAttempt(source) {
+  const updater = getUpdater();
+  configureUpdaterSource(updater, source);
+  setState({ status: 'checking', error: null, mode: 'electron-updater', source: source.kind });
+
+  suppressUpdaterErrors = true;
+  try {
+    const result = await updater.checkForUpdates();
+    if (result && result.isUpdateAvailable) {
+      await updater.downloadUpdate(result.cancellationToken);
+    }
+    return result;
+  } finally {
+    suppressUpdaterErrors = false;
+  }
+}
+
+async function checkElectronUpdaterWithFallback() {
+  const preferred = configuredUpdateSource();
+  try {
+    return { result: await runUpdaterAttempt(preferred), source: preferred };
+  } catch (mirrorError) {
+    if (preferred.provider !== 'generic') throw mirrorError;
+    const fallback = officialUpdateSource({ fallback: true });
+    bus.send('[更新] 自定义镜像检查或下载失败，回退 GitHub 官方源：' + (mirrorError && mirrorError.message ? mirrorError.message : mirrorError), 'warn');
+    try {
+      return { result: await runUpdaterAttempt(fallback), source: fallback };
+    } catch (officialError) {
+      throw new Error(
+        '更新镜像失败：' + (mirrorError && mirrorError.message ? mirrorError.message : mirrorError) +
+        '；GitHub 官方源也失败：' + (officialError && officialError.message ? officialError.message : officialError)
+      );
+    }
+  }
 }
 
 async function prepareForUpdateInstall() {
@@ -684,8 +865,7 @@ async function checkNow() {
   }
 
   try {
-    setState({ status: 'checking', error: null, mode: 'electron-updater' });
-    const result = await getUpdater().checkForUpdates();
+    const { result } = await checkElectronUpdaterWithFallback();
     return { ok: true, state: getState(), updateInfo: result && result.updateInfo ? result.updateInfo : null };
   } catch (err) {
     const msg = normalizeUpdateError(err);
@@ -721,11 +901,13 @@ async function quitAndInstall(opts) {
   const forceRunAfter = opts.forceRunAfter !== false;
   try {
     try { app.removeAllListeners('activate'); } catch {}
+    try { app.updateQuitPrepared = true; } catch {}
     getUpdater().quitAndInstall(silent, forceRunAfter);
     scheduleForceExit(5000);
     bus.send('[更新] 已请求退出并安装，若窗口未关闭将在数秒后强制结束', 'info');
     return { ok: true, state: getState(), summary };
   } catch (err) {
+    try { app.updateQuitPrepared = false; } catch {}
     installing = false;
     const msg = normalizeUpdateError(err);
     setState({ status: 'downloaded', error: msg });

@@ -2,10 +2,14 @@
 
 const fs = require('fs');
 const path = require('path');
-const vscode = require('vscode');
-const { findExecutableOnPath } = require('../../vendor/flash-core');
+const { findExecutableOnPath, runProcess, runCapture } = require('../../vendor/flash-core');
 const { PlatformBase } = require('./base');
 const { existsFile, whichSync } = require('./utils');
+
+const DEVICE_CACHE_MS = 2000;
+let cachedDevices = [];
+let devicesCachedAt = 0;
+let deviceListTask = null;
 
 /**
  * 解析 platformio.ini 配置
@@ -65,6 +69,11 @@ function resolvePio() {
  * @param {{ dir, cfg, output, t }} ctx
  */
 async function runPioViaCli(action, { dir, cfg, output, t }) {
+  if (!dir || !fs.existsSync(path.join(dir, 'platformio.ini'))) {
+    const msg = '未找到有效的 PlatformIO 工程';
+    output.append(`[ESP32] ✗ ${msg}`, 'error');
+    return { ok: false, error: msg };
+  }
   const pio = resolvePio();
   if (!pio.ok) {
     const msg = t('esp32.pio_not_found') || '未找到 pio';
@@ -72,49 +81,73 @@ async function runPioViaCli(action, { dir, cfg, output, t }) {
     return { ok: false, error: msg };
   }
 
-  const { spawn } = require('child_process');
   const args = action === 'upload' ? ['run', '-t', 'upload'] : ['run'];
+  const serialPort = String((cfg && cfg.serialPort) || '').trim();
+  if (action === 'upload' && serialPort) args.push('--upload-port', serialPort);
 
   output.append(`[ESP32] ${path.basename(pio.path)} ${args.join(' ')}`, 'step');
 
-  return new Promise((resolve) => {
-    const proc = spawn(pio.path, args, { cwd: dir, shell: false });
-    let stdout = '';
-    let stderr = '';
-
-    proc.stdout.on('data', (chunk) => {
-      const text = chunk.toString();
-      stdout += text;
-      // 实时输出所有非空行
-      text.split(/\r?\n/).filter(Boolean).forEach((line) => {
-        output.append(`[PIO] ${line.trim()}`, 'info');
-      });
-    });
-
-    proc.stderr.on('data', (chunk) => {
-      const text = chunk.toString();
-      stderr += text;
-      // 实时输出 stderr（通常是警告/错误）
-      text.split(/\r?\n/).filter(Boolean).forEach((line) => {
-        output.append(`[PIO stderr] ${line.trim()}`, 'warn');
-      });
-    });
-
-    proc.on('close', (code) => {
-      if (code === 0) {
-        output.append(`[ESP32] ✓ ${action === 'upload' ? '烧录成功' : '编译成功'}`, 'success');
-        resolve({ ok: true });
-      } else {
-        output.append(`[ESP32] ✗ ${action === 'upload' ? '烧录失败' : '编译失败'} (exit ${code})`, 'error');
-        resolve({ ok: false, error: `pio exit ${code}` });
-      }
-    });
-
-    proc.on('error', (err) => {
-      output.append(`[ESP32] ✗ ${err.message}`, 'error');
-      resolve({ ok: false, error: err.message });
-    });
+  const code = await runProcess(pio.path, args, {
+    cwd: dir,
+    shell: false,
+    windowsHide: true,
+    clean: (line) => {
+      const text = line.trim();
+      if (!text) return null;
+      const type = /\b(failed|fatal|error)\b/i.test(text)
+        ? 'error'
+        : /\bwarning\b/i.test(text)
+          ? 'warn'
+          : /\b(succeeded|success)\b/i.test(text)
+            ? 'success'
+            : 'info';
+      return { text: `[PIO] ${text}`, type };
+    }
   });
+  const ok = code === 0;
+  output.append(
+    `[ESP32] ${ok ? '✓' : '✗'} ${action === 'upload' ? '烧录' : '编译'}${ok ? '成功' : `失败 (exit ${code})`}`,
+    ok ? 'success' : 'error'
+  );
+  return { ok, error: ok ? undefined : `pio exit ${code}` };
+}
+
+async function queryPioDevices(pioPath) {
+  const pio = pioPath ? { ok: true, path: pioPath } : resolvePio();
+  if (!pio.ok) return [];
+  const result = await runCapture(pio.path, ['device', 'list', '--json-output'], {
+    shell: false,
+    windowsHide: true,
+    timeoutMs: 10000
+  });
+  if (result.code !== 0) return [];
+  try {
+    const start = result.out.indexOf('[');
+    const end = result.out.lastIndexOf(']');
+    if (start < 0 || end < start) return [];
+    const devices = JSON.parse(result.out.slice(start, end + 1));
+    if (!Array.isArray(devices)) return [];
+    return devices.map((device) => ({
+      port: String((device && device.port) || '').trim(),
+      description: String((device && device.description) || '').trim(),
+      hwid: String((device && device.hwid) || '').trim()
+    })).filter((device) => device.port);
+  } catch {
+    return [];
+  }
+}
+
+async function listPioDevices(pioPath, force = false) {
+  if (!force && Date.now() - devicesCachedAt < DEVICE_CACHE_MS) return cachedDevices.slice();
+  if (deviceListTask) return deviceListTask;
+  deviceListTask = queryPioDevices(pioPath).then((devices) => {
+    cachedDevices = devices;
+    devicesCachedAt = Date.now();
+    return devices.slice();
+  }).finally(() => {
+    deviceListTask = null;
+  });
+  return deviceListTask;
 }
 
 class Esp32Platform extends PlatformBase {
@@ -158,39 +191,41 @@ class Esp32Platform extends PlatformBase {
   async checkReadiness(cfg, dir) {
     const c = cfg || {};
     const subMode = c.esp32SubMode || 'platformio';
+    const frameworkLabel = subMode === 'idf'
+      ? 'ESP-IDF'
+      : subMode === 'arduino'
+        ? 'Arduino'
+        : subMode === 'micropython'
+          ? 'MicroPython'
+          : 'PlatformIO';
 
-    const compiler = { mode: 'esp32', label: 'PlatformIO', ok: false, detail: '', path: '' };
+    const compiler = { mode: 'esp32', label: `PlatformIO / ${frameworkLabel}`, ok: false, detail: '', path: '' };
     const flasher  = { mode: 'esp32', label: 'PlatformIO', ok: false, online: false, detail: '', path: '', probes: [] };
 
-    if (subMode === 'platformio' || subMode === 'arduino' || subMode === 'idf' || subMode === 'micropython') {
-      const pio = resolvePio();
-      if (pio.ok) {
-        compiler.ok = true;
-        compiler.path = pio.path;
-        compiler.detail = `pio · ${path.basename(pio.path)}`;
-        flasher.ok = true;
-        flasher.online = true;
-        flasher.path = pio.path;
-        flasher.detail = 'PlatformIO CLI 就绪';
-        const pioExt = vscode.extensions.getExtension('platformio.platformio-ide');
-        if (pioExt && !pioExt.isActive) {
-          flasher.online = false;
-          flasher.detail = 'PlatformIO IDE 已安装，请重启 VS Code 以激活扩展';
-          compiler.detail = 'pio · ' + path.basename(pio.path) + '（需重启 VS Code 激活 PlatformIO IDE）';
-        }
-      } else {
-        const msg = '未找到 pio，请安装 PlatformIO CLI 或 PlatformIO IDE';
-        compiler.detail = msg;
-        flasher.detail = msg;
-      }
-      if (compiler.ok && dir && !fs.existsSync(path.join(dir, 'platformio.ini'))) {
-        compiler.ok = false;
-        compiler.detail = '未找到 platformio.ini';
-        flasher.ok = false; flasher.online = false;
-        flasher.detail = '未找到 platformio.ini';
-      }
+    const pio = resolvePio();
+    if (!dir || !fs.existsSync(path.join(dir, 'platformio.ini'))) {
+      compiler.detail = `${frameworkLabel} 原生工程暂未支持，请使用 PlatformIO 工程`;
+      flasher.detail = '未找到 platformio.ini';
+    } else if (pio.ok) {
+      compiler.ok = true;
+      compiler.path = pio.path;
+      compiler.detail = `pio · ${frameworkLabel} · ${path.basename(pio.path)}`;
+      flasher.ok = true;
+      flasher.path = pio.path;
+      const devices = await listPioDevices(pio.path);
+      flasher.probes = devices;
+      const configuredPort = String(c.serialPort || '').trim();
+      const selected = configuredPort
+        ? devices.find((device) => device.port.toLowerCase() === configuredPort.toLowerCase())
+        : devices[0];
+      flasher.online = !!selected;
+      flasher.detail = selected
+        ? `串口在线 · ${selected.port}`
+        : configuredPort
+          ? `未检测到已选串口 ${configuredPort}`
+          : '未检测到可用串口';
     } else {
-      const msg = `${subMode} 模式即将支持`;
+      const msg = '未找到 pio，请安装 PlatformIO CLI 或 PlatformIO IDE';
       compiler.detail = msg;
       flasher.detail = msg;
     }
@@ -228,4 +263,4 @@ class Esp32Platform extends PlatformBase {
   // checkProbe / readChipInfo 返回 null → 上层跳过
 }
 
-module.exports = { Esp32Platform, resolvePio };
+module.exports = { Esp32Platform, resolvePio, listPioDevices };

@@ -1,4 +1,4 @@
-const { app } = require('electron');
+const { app, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const {
@@ -26,6 +26,7 @@ const DEFAULT_CONFIG = {
   toolchainMode: 'custom', // 'custom' = 用上面的自定义路径；'default' = 自动下载到 toolchainRootPath/userData
   toolchainRootPath: '', // 默认工具链下载保存目录；留空=打包态 userData/toolchain，开发态仓库根 toolchain/
   ghProxy: '', // 可选下载加速镜像前缀，如 https://gh-proxy.com ；留空直连 GitHub
+  updateFeedUrl: '', // 可选应用更新镜像根地址；需包含 latest*.yml 与安装包，建议同步 blockmap，留空使用 GitHub
   buildSystem: 'auto', // 'auto' = 按工程文件自动判断；'make' = Makefile(GCC)；'keil' = Keil uVision5(UV4)
   keilUV4Path: String.raw`C:\Keil_v5\UV4\UV4.exe`, // Keil uVision5 的 UV4.exe 路径
   keilRebuild: false, // true = 重新编译全部(-r)；false = 增量编译(-b)
@@ -79,9 +80,10 @@ const DEFAULT_CONFIG = {
   platformPaths: {}, // 分平台路径配置 { windows|macos|linux: { armGccPath, makePath, pyocdPath, cubeMxPath, keilUV4Path } }
   serialQuickCmds: [], // 旧版：扁平快捷指令列表（兼容迁移用）
   serialCmdGroups: [], // 串口快捷指令分组 [{name, cmds:[{name,content,hex,interval,unit,enabled}]}]
+  serialAutoReconnect: false, // 串口意外掉线后按退避间隔自动重连；手动断开不触发
   httpApi: {           // 本地 HTTP API：外部工具可 POST /api/build-flash 触发一键编译烧录
-    enabled: true,     // 主进程启动时是否自动开启
-    host: '127.0.0.1', // 仅监听回环；改成 0.0.0.0 才对外暴露（不推荐）
+    enabled: false,    // 安全默认：仅在用户显式启用后启动
+    host: '127.0.0.1', // 仅允许监听本机回环地址
     port: 27080        // TCP 端口
   }
 };
@@ -97,12 +99,48 @@ let _configCache = null;
 let _saveTimer = null;
 let _dirtyConfig = null; // 待写入磁盘的最新快照
 const SAVE_DEBOUNCE_MS = 80;
+const SECRET_PREFIX = 'safe:v1:';
+
+function canEncryptSecrets() {
+  try { return !!safeStorage && safeStorage.isEncryptionAvailable(); }
+  catch { return false; }
+}
+
+function transformMqttPasswords(cfg, transform) {
+  const copy = JSON.parse(JSON.stringify(cfg || {}));
+  if (Array.isArray(copy.mqttConns)) {
+    for (const conn of copy.mqttConns) {
+      if (conn && typeof conn.password === 'string') conn.password = transform(conn.password);
+    }
+  }
+  if (copy.mqttConfig && typeof copy.mqttConfig.password === 'string') {
+    copy.mqttConfig.password = transform(copy.mqttConfig.password);
+  }
+  return copy;
+}
+
+function encryptConfigSecrets(cfg) {
+  if (!canEncryptSecrets()) return cfg;
+  return transformMqttPasswords(cfg, (password) => {
+    if (!password || password.startsWith(SECRET_PREFIX)) return password;
+    return SECRET_PREFIX + safeStorage.encryptString(password).toString('base64');
+  });
+}
+
+function decryptConfigSecrets(cfg) {
+  return transformMqttPasswords(cfg, (password) => {
+    if (!password || !password.startsWith(SECRET_PREFIX)) return password;
+    if (!canEncryptSecrets()) return '';
+    try { return safeStorage.decryptString(Buffer.from(password.slice(SECRET_PREFIX.length), 'base64')); }
+    catch { return ''; }
+  });
+}
 
 function loadConfig() {
   if (_configCache) return _configCache;
   try {
     const raw = fs.readFileSync(configPath(), 'utf8');
-    _configCache = normalizeConfig(Object.assign({}, DEFAULT_CONFIG, JSON.parse(raw)));
+    _configCache = normalizeConfig(Object.assign({}, DEFAULT_CONFIG, decryptConfigSecrets(JSON.parse(raw))));
   } catch {
     _configCache = normalizeConfig(Object.assign({}, DEFAULT_CONFIG));
   }
@@ -110,7 +148,11 @@ function loadConfig() {
 }
 
 function normalizeConfig(cfg) {
-  const next = applyPlatformPaths(Object.assign({}, cfg), PLATFORM_TC.id, DEFAULT_CONFIG);
+  const source = Object.assign({}, cfg, {
+    httpApi: Object.assign({}, DEFAULT_CONFIG.httpApi, (cfg && cfg.httpApi) || {})
+  });
+  const next = applyPlatformPaths(source, PLATFORM_TC.id, DEFAULT_CONFIG);
+  next.updateFeedUrl = typeof next.updateFeedUrl === 'string' ? next.updateFeedUrl.trim() : '';
   if (!KEIL_SUPPORTED) {
     if (next.buildSystem === 'keil') next.buildSystem = 'make';
     if (next.flashMethod === 'keil') next.flashMethod = 'pyocd';
@@ -123,12 +165,13 @@ function writeConfigToDisk(merged) {
   fs.mkdirSync(path.dirname(p), { recursive: true });
   // 原子写：先写临时文件再 rename，避免进程被杀时截断 config.json
   const tmp = p + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(merged, null, 2), 'utf8');
+  const serialized = JSON.stringify(encryptConfigSecrets(merged), null, 2);
+  fs.writeFileSync(tmp, serialized, 'utf8');
   try {
     fs.renameSync(tmp, p);
   } catch {
     // 跨设备等极端情况：回退直接写
-    fs.writeFileSync(p, JSON.stringify(merged, null, 2), 'utf8');
+    fs.writeFileSync(p, serialized, 'utf8');
     try { fs.unlinkSync(tmp); } catch {}
   }
 }

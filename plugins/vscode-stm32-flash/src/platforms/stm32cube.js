@@ -1,5 +1,6 @@
 'use strict';
 
+const fs = require('fs');
 const path = require('path');
 const {
   compile,
@@ -65,7 +66,9 @@ class Stm32CubePlatform extends PlatformBase {
     const makeBin = resolveMake(c);
     const gccBin  = resolveArmGcc(c);
     compiler.path = makeBin || gccBin || '';
-    if (!makeBin && !gccBin) {
+    if (!dir || !fs.existsSync(path.join(dir, 'Makefile'))) {
+      compiler.detail = '工程目录未找到 Makefile';
+    } else if (!makeBin && !gccBin) {
       compiler.detail = '未找到 make / arm-none-eabi-gcc';
     } else if (!makeBin) {
       compiler.detail = '未找到 make（GCC 已找到）';

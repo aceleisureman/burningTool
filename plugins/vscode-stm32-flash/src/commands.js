@@ -4,13 +4,14 @@ const vscode = require('vscode');
 const { updateSetting } = require('./config');
 const { listRecentProjectInfos } = require('./recentStore');
 const { t } = require('./i18n');
+const { selectSerialPort } = require('./serialPort');
 
 /**
  * @param {vscode.ExtensionContext} context
  * @param {object} deps
  */
 function registerCommands(context, deps) {
-  const { service, output, pickProjectDir, ensureProjectDir, provider } = deps;
+  const { service, output, pickProjectDir, ensureProjectDir, dependencyInstaller } = deps;
 
   const cmds = [
     ['stm32Flash.selectProject', async () => {
@@ -23,7 +24,6 @@ function registerCommands(context, deps) {
         if (!dir) return;
         await service.selectProject(dir, { openInVscode: true });
       }
-      provider.refresh();
     }],
     ['stm32Flash.openRecent', async () => {
       const items = listRecentProjectInfos().map((r) => ({
@@ -50,39 +50,37 @@ function registerCommands(context, deps) {
           t('recent.remove_action')
         );
         if (act === t('recent.remove_action')) await service.removeRecent(picked.dir);
-        provider.refresh();
         return;
       }
       await service.openRecent(picked.dir);
-      provider.refresh();
     }],
     ['stm32Flash.build', async () => {
       await service.doBuild();
-      provider.refresh();
     }],
     ['stm32Flash.flash', async () => {
       await service.doFlash();
-      provider.refresh();
     }],
     ['stm32Flash.buildAndFlash', async () => {
       await service.doBuildAndFlash();
-      provider.refresh();
     }],
     ['stm32Flash.generateMakefile', async () => {
       await service.doGenerateMakefile();
-      provider.refresh();
     }],
     ['stm32Flash.checkProbe', async () => {
       await service.doCheckProbe();
-      provider.refresh();
     }],
     ['stm32Flash.readChipInfo', async () => {
       await service.doReadChipInfo();
-      provider.refresh();
     }],
     ['stm32Flash.cancel', async () => {
       service.cancel();
-      provider.refresh();
+    }],
+    ['stm32Flash.selectSerialPort', async () => {
+      await selectSerialPort();
+    }],
+    ['stm32Flash.installDependencies', async () => {
+      const result = await dependencyInstaller.install();
+      if (result && result.ok) await service.refreshState();
     }],
     ['stm32Flash.openOutput', () => output.show(false)],
     ['stm32Flash.openSettings', () => {
@@ -98,7 +96,6 @@ function registerCommands(context, deps) {
     vscode.commands.registerCommand('stm32Flash._updateSetting', async (key, value) => {
       await updateSetting(key, value);
       await service.refreshState();
-      provider.refresh();
     })
   );
 }

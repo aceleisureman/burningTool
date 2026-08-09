@@ -5,6 +5,36 @@ const { loadConfig, addRecent, removeRecent } = require('../core/config');
 const { findKeilProject, findIocFile, detectBuildSystem } = require('../flash/flasher');
 const windows = require('../windows');
 
+const MAX_QUICKCMD_FILE_BYTES = 2 * 1024 * 1024;
+const MAX_QUICKCMD_GROUPS = 128;
+const MAX_QUICKCMD_COUNT = 4096;
+const MAX_QUICKCMD_TEXT_CHARS = 64 * 1024;
+
+function validateQuickCmdData(data) {
+  let groups = null;
+  if (Array.isArray(data) && data.some((item) => item && Array.isArray(item.cmds))) groups = data;
+  else if (data && Array.isArray(data.serialCmdGroups)) groups = data.serialCmdGroups;
+  else if (Array.isArray(data)) groups = [{ cmds: data }];
+  else if (data && Array.isArray(data.serialQuickCmds)) groups = [{ cmds: data.serialQuickCmds }];
+  if (!groups) return { ok: true };
+  if (groups.length > MAX_QUICKCMD_GROUPS) return { ok: false, error: `分组数量不能超过 ${MAX_QUICKCMD_GROUPS}` };
+  let count = 0;
+  for (const group of groups) {
+    if (!group || !Array.isArray(group.cmds)) continue;
+    count += group.cmds.length;
+    if (count > MAX_QUICKCMD_COUNT) return { ok: false, error: `快捷指令数量不能超过 ${MAX_QUICKCMD_COUNT}` };
+    for (const cmd of group.cmds) {
+      if (!cmd || typeof cmd !== 'object') continue;
+      for (const key of ['name', 'content']) {
+        if (cmd[key] != null && String(cmd[key]).length > MAX_QUICKCMD_TEXT_CHARS) {
+          return { ok: false, error: `快捷指令${key === 'name' ? '名称' : '内容'}过长` };
+        }
+      }
+    }
+  }
+  return { ok: true };
+}
+
 function dirInfo(dir) {
   const exists = !!dir && fs.existsSync(dir);
   const hasMakefile = exists && fs.existsSync(path.join(dir, 'Makefile'));
@@ -65,7 +95,11 @@ function registerProjectIpc() {
     });
     if (result.canceled || !result.filePath) return { ok: false, canceled: true };
     try {
-      fs.writeFileSync(result.filePath, JSON.stringify(data || [], null, 2), 'utf8');
+      const valid = validateQuickCmdData(data);
+      if (!valid.ok) return valid;
+      const text = JSON.stringify(data || [], null, 2);
+      if (Buffer.byteLength(text, 'utf8') > MAX_QUICKCMD_FILE_BYTES) return { ok: false, error: `导出文件不能超过 ${MAX_QUICKCMD_FILE_BYTES} 字节` };
+      fs.writeFileSync(result.filePath, text, 'utf8');
       return { ok: true, path: result.filePath };
     } catch (e) {
       return { ok: false, error: e.message };
@@ -80,7 +114,12 @@ function registerProjectIpc() {
     });
     if (result.canceled || !result.filePaths || !result.filePaths[0]) return { ok: false, canceled: true };
     try {
-      return { ok: true, data: JSON.parse(fs.readFileSync(result.filePaths[0], 'utf8')) };
+      const stat = fs.statSync(result.filePaths[0]);
+      if (!stat.isFile()) return { ok: false, error: '选择的路径不是文件' };
+      if (stat.size > MAX_QUICKCMD_FILE_BYTES) return { ok: false, error: `导入文件不能超过 ${MAX_QUICKCMD_FILE_BYTES} 字节` };
+      const data = JSON.parse(fs.readFileSync(result.filePaths[0], 'utf8'));
+      const valid = validateQuickCmdData(data);
+      return valid.ok ? { ok: true, data } : valid;
     } catch (e) {
       return { ok: false, error: e.message };
     }

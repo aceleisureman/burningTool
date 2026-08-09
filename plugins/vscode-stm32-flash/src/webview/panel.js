@@ -1,18 +1,9 @@
 'use strict';
 
-const fs = require('fs');
-const path = require('path');
+const crypto = require('crypto');
 const vscode = require('vscode');
-const { updateSetting } = require('../config');
 const { t, locale } = require('../i18n');
-
-// platformio.ini 的 framework 映射
-const PIO_FRAMEWORK_MAP = {
-  platformio: '',
-  arduino: 'arduino',
-  idf: 'espidf',
-  micropython: 'micropython'
-};
+const { createMessageRouter } = require('./messageRouter');
 
 class Stm32FlashViewProvider {
   static viewType = 'stm32Flash.sidebar';
@@ -28,7 +19,11 @@ class Stm32FlashViewProvider {
     this._version = version || '0.0.0';
     /** @type {vscode.WebviewView | undefined} */
     this._view = undefined;
+    this._refreshPending = false;
+    this._forceRefreshPending = false;
+    this._lastStateJson = '';
     this._onState = () => this.refresh();
+    this._routeMessage = createMessageRouter(service, (force) => this.refresh(force));
     service.on('state', this._onState);
   }
 
@@ -42,137 +37,48 @@ class Stm32FlashViewProvider {
       localResourceRoots: [this._extensionUri]
     };
     webviewView.webview.html = this._getHtml(webviewView.webview);
-    webviewView.webview.onDidReceiveMessage(async (msg) => {
-      if (!msg || !msg.type) return;
-      try {
-        switch (msg.type) {
-          case 'ready':
-            this.refresh();
-            break;
-          case 'selectProject':
-            await vscode.commands.executeCommand('stm32Flash.selectProject');
-            break;
-          case 'openRecent':
-            if (msg.dir) await this._service.openRecent(msg.dir);
-            break;
-          case 'removeRecent':
-            if (msg.dir) await this._service.removeRecent(msg.dir);
-            break;
-          case 'build':
-            await this._service.doBuild();
-            break;
-          case 'flash':
-            await this._service.doFlash();
-            break;
-          case 'buildAndFlash':
-            await this._service.doBuildAndFlash();
-            break;
-          case 'generateMakefile':
-            await this._service.doGenerateMakefile();
-            break;
-          case 'checkProbe':
-            await this._service.doCheckProbe();
-            break;
-          case 'readChipInfo':
-            await this._service.doReadChipInfo();
-            break;
-          case 'cancel':
-            this._service.cancel();
-            break;
-          case 'openOutput':
-            await vscode.commands.executeCommand('stm32Flash.openOutput');
-            break;
-          case 'openSettings':
-            await vscode.commands.executeCommand('stm32Flash.openSettings');
-            break;
-          case 'setFlashMethod':
-            await updateSetting('flashMethod', msg.value);
-            await this._service.refreshState();
-            break;
-          case 'setAutoDetect':
-            await updateSetting('autoDetectChip', !!msg.value);
-            await this._service.refreshState();
-            break;
-          case 'setUnderReset':
-            await updateSetting('connectUnderReset', !!msg.value);
-            await this._service.refreshState();
-            break;
-          case 'setProjectMode': {
-            const newMode = msg.value;
-            await updateSetting('projectMode', newMode);
-            // 切换模式时自动修正 flashMethod
-            const currentCfg = this._service.getState().cfg || {};
-            if (newMode === 'keil5') {
-              await updateSetting('flashMethod', 'keil');
-            } else if (newMode === 'stm32cube') {
-              // stm32cube 不支持 keil 烧录方式，回退到 pyocd
-              if (currentCfg.flashMethod === 'keil') {
-                await updateSetting('flashMethod', 'pyocd');
-              }
-            } else if (newMode === 'esp32') {
-              // esp32 模式不使用 flashMethod，不需要改
-            }
-            await this._service.refreshState();
-            break;
-          }
-          case 'setEsp32SubMode':
-            await updateSetting('esp32SubMode', msg.value);
-            // 同步修改 platformio.ini 的 framework 字段
-            const proj = this._service.getState().project || {};
-            const iniDir = proj.dir || '';
-            if (iniDir) {
-              const iniPath = path.join(iniDir, 'platformio.ini');
-              const targetFramework = PIO_FRAMEWORK_MAP[msg.value] || '';
-              if (targetFramework) {
-                try {
-                  if (fs.existsSync(iniPath)) {
-                    let ini = fs.readFileSync(iniPath, 'utf8');
-                    if (/^\s*framework\s*=/im.test(ini)) {
-                      ini = ini.replace(/^\s*framework\s*=\s*\S+/im, `framework = ${targetFramework}`);
-                    } else {
-                      ini += `\nframework = ${targetFramework}\n`;
-                    }
-                    fs.writeFileSync(iniPath, ini, 'utf8');
-                  }
-                } catch (e) {
-                  vscode.window.showWarningMessage(`MCU-Assistant: ${t('esp32.framework_switch_fail', e.message)}`);
-                }
-              }
-            }
-            await this._service.refreshState();
-            break;
-          case 'installPlatformIO':
-            await vscode.commands.executeCommand(
-              'workbench.extensions.installExtension',
-              'platformio.platformio-ide'
-            );
-            await this._service.refreshState();
-            break;
-          default:
-            break;
-        }
-      } catch (e) {
-        vscode.window.showErrorMessage(`MCU-Assistant: ${e.message || e}`);
-      } finally {
-        this.refresh();
+    webviewView.webview.onDidReceiveMessage(this._routeMessage);
+    webviewView.onDidDispose(() => {
+      if (this._view === webviewView) {
+        this._view = undefined;
+        this._lastStateJson = '';
       }
     });
-    this.refresh();
+    this.refresh(true);
   }
 
-  refresh() {
+  dispose() {
+    this._service.off('state', this._onState);
+    this._view = undefined;
+  }
+
+  refresh(force = false) {
     if (!this._view) return;
-    this._view.webview.postMessage({ type: 'state', state: this._service.getState() });
+    this._forceRefreshPending = this._forceRefreshPending || force;
+    if (this._refreshPending) return;
+    this._refreshPending = true;
+    queueMicrotask(() => {
+      this._refreshPending = false;
+      if (!this._view) return;
+      const shouldForce = this._forceRefreshPending;
+      this._forceRefreshPending = false;
+      const state = this._service.getState();
+      const stateJson = JSON.stringify(state);
+      if (!shouldForce && stateJson === this._lastStateJson) return;
+      this._lastStateJson = stateJson;
+      this._view.webview.postMessage({ type: 'state', state });
+    });
   }
 
   /**
    * @param {vscode.Webview} webview
    */
   _getHtml(webview) {
+    const nonce = crypto.randomBytes(16).toString('base64');
     const csp = [
       "default-src 'none'",
       `style-src ${webview.cspSource} 'unsafe-inline'`,
-      `script-src ${webview.cspSource} 'unsafe-inline'`
+      `script-src ${webview.cspSource} 'nonce-${nonce}'`
     ].join('; ');
 
     const currentLocale = locale();
@@ -795,6 +701,9 @@ class Stm32FlashViewProvider {
       <button id="btnLog" class="icon-btn tip" aria-label="Open log">
         <svg viewBox="0 0 24 24" fill="none"><path d="M6 4.5h9l3 3V19.5H6V4.5z" stroke="currentColor" stroke-width="1.5"/><path d="M9 10.5h6M9 13.5h6M9 16.5h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"/></svg>
       </button>
+      <button id="btnDeps" class="icon-btn tip" aria-label="Download dependencies">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M12 4.5v10M8.5 11l3.5 3.5 3.5-3.5M5 18.5h14" stroke="currentColor" stroke-width="1.5" stroke-linecap="square" stroke-linejoin="miter"/></svg>
+      </button>
       <button id="btnSettings" class="icon-btn tip" aria-label="Settings">
         <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.5"/><path d="M12 3.8v2M12 18.2v2M3.8 12h2M18.2 12h2M6.1 6.1l1.4 1.4M16.5 16.5l1.4 1.4M17.9 6.1l-1.4 1.4M7.5 16.5l-1.4 1.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"/></svg>
       </button>
@@ -839,6 +748,9 @@ class Stm32FlashViewProvider {
       <label class="opt"><input type="checkbox" id="autoDetect" /> <span id="labelAutoDetect">自动识别芯片</span></label>
       <label class="opt"><input type="checkbox" id="underReset" /> <span id="labelUnderReset">复位下连接</span></label>
     </div>
+    <div class="opts" id="dependencyOpts">
+      <label class="opt"><input type="checkbox" id="autoDownloadDeps" /> <span id="labelAutoDownloadDeps">自动下载依赖</span></label>
+    </div>
   </section>
   </div>
 
@@ -850,15 +762,15 @@ class Stm32FlashViewProvider {
     </div>
     <div class="recent-body">
       <div id="recentList" class="recent-list">
-        <div class="recent-empty" id="recentEmptyMsg">暂无历史（与 MCU 工具箱共用）</div>
+        <div class="recent-empty" id="recentEmptyMsg">暂无历史工程</div>
       </div>
-      <div class="hint" id="recentHint">点击切换 VS Code 工程 · 与 MCU 工具箱互通</div>
+      <div class="hint" id="recentHint">点击切换 VS Code 工程</div>
     </div>
   </section>
 
   <div class="ext-footer">MCU-Assistant v${version}</div>
 
-  <script>
+  <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     const $ = (id) => document.getElementById(id);
 
@@ -877,6 +789,7 @@ class Stm32FlashViewProvider {
         tipChip: '读取芯片信息',
         tipGen: '由 CubeMX 生成 Makefile',
         tipLog: '打开编译/烧录日志',
+        tipDependencies: '下载缺失的工具链依赖',
         tipSettings: '打开插件设置',
         tipCancel: '取消当前编译/烧录任务',
         tipSelect: '选择工程目录并切换 VS Code',
@@ -887,9 +800,10 @@ class Stm32FlashViewProvider {
         labelDevice: '烧录设备',
         labelAutoDetect: '自动识别芯片',
         labelUnderReset: '复位下连接',
+        labelAutoDownloadDeps: '自动下载依赖',
         hintDefault: '悬停图标查看功能说明。',
-        recentHint: '点击切换 VS Code 工程 · 与 MCU 工具箱互通',
-        recentEmpty: '暂无历史（与 MCU 工具箱共用）',
+        recentHint: '点击切换 VS Code 工程',
+        recentEmpty: '暂无历史工程',
         recentMissing: ' · 不存在',
         recentTipOpen: '打开并切换 VS Code',
         recentTipRemove: '从历史移除',
@@ -912,7 +826,7 @@ class Stm32FlashViewProvider {
         buildNone: '不可编译',
         sourceWorkspace: '当前工作区',
         sourceSettings: '手动选择',
-        toolchainInstalled: '已共用',
+        toolchainInstalled: '已安装',
         toolchainNone: '未安装',
         labelProjectType: '工程类型',
         labelBuildSystem: '编译方式',
@@ -960,6 +874,7 @@ class Stm32FlashViewProvider {
         tipChip: 'Read chip info',
         tipGen: 'Generate Makefile from CubeMX .ioc',
         tipLog: 'Open build/flash log',
+        tipDependencies: 'Download missing toolchain dependencies',
         tipSettings: 'Open extension settings',
         tipCancel: 'Cancel current build/flash task',
         tipSelect: 'Select project directory and switch VS Code',
@@ -970,9 +885,10 @@ class Stm32FlashViewProvider {
         labelDevice: 'Flash device',
         labelAutoDetect: 'Auto-detect chip',
         labelUnderReset: 'Connect under reset',
+        labelAutoDownloadDeps: 'Auto-download dependencies',
         hintDefault: 'Hover icons to see tooltips.',
-        recentHint: 'Click to switch VS Code workspace · shared with MCU Toolbox',
-        recentEmpty: 'No recent projects (shared with MCU Toolbox)',
+        recentHint: 'Click to switch VS Code workspace',
+        recentEmpty: 'No recent projects',
         recentMissing: ' · missing',
         recentTipOpen: 'Open and switch VS Code',
         recentTipRemove: 'Remove from history',
@@ -1048,6 +964,7 @@ class Stm32FlashViewProvider {
       // checkbox labels
       setTxt('labelAutoDetect', 'labelAutoDetect');
       setTxt('labelUnderReset', 'labelUnderReset');
+      setTxt('labelAutoDownloadDeps', 'labelAutoDownloadDeps');
       // recent hint
       setTxt('recentHint', 'recentHint');
       // status dot title
@@ -1061,6 +978,7 @@ class Stm32FlashViewProvider {
         btnChip:     ['tipChip',     'tipChip'],
         btnGen:      ['tipGen',      'tipGen'],
         btnLog:      ['tipLog',      'tipLog'],
+        btnDeps:     ['tipDependencies', 'tipDependencies'],
         btnSettings: ['tipSettings', 'tipSettings'],
         btnCancel:   ['tipCancel',   'tipCancel'],
         btnSelect:   ['tipSelect',   'ariaSelect']
@@ -1098,6 +1016,7 @@ class Stm32FlashViewProvider {
       recentHd.onclick = () => recentCard.classList.toggle('expanded');
     }
     $('btnSettings').onclick = () => post('openSettings');
+    $('btnDeps').onclick = () => post('installDependencies');
     $('btnLog').onclick = () => post('openOutput');
     $('btnProbe').onclick = () => post('checkProbe');
     $('btnChip').onclick = () => post('readChipInfo');
@@ -1108,6 +1027,7 @@ class Stm32FlashViewProvider {
     $('btnCancel').onclick = () => post('cancel');
     $('autoDetect').onchange = (e) => post('setAutoDetect', { value: e.target.checked });
     $('underReset').onchange = (e) => post('setUnderReset', { value: e.target.checked });
+    $('autoDownloadDeps').onchange = (e) => post('setAutoDownloadDependencies', { value: e.target.checked });
 
     // 模式切换
     document.querySelectorAll('#modeBar .mode-btn').forEach((btn) => {
@@ -1238,6 +1158,8 @@ class Stm32FlashViewProvider {
         if (badge) { badge.className = 'proj-badge ok'; badge.textContent = t('projectMixed'); }
       } else if (kind === 'cubemx') {
         if (badge) { badge.className = 'proj-badge warn'; badge.textContent = t('projectCubeMx'); }
+      } else if (kind.startsWith('esp32-')) {
+        if (badge) { badge.className = p.projectValid ? 'proj-badge ok' : 'proj-badge warn'; badge.textContent = kindLabel; }
       } else {
         if (badge) { badge.className = 'proj-badge err'; badge.textContent = t('projectUnknown'); }
       }
@@ -1247,8 +1169,9 @@ class Stm32FlashViewProvider {
         projPathEl.title = p.dir || '';
       }
 
+      const projectMode = (state.cfg || {}).projectMode || 'stm32cube';
       const build = p.projectValid
-        ? (p.buildSystem === 'keil' ? t('buildKeil') : t('buildMake'))
+        ? (projectMode === 'esp32' ? 'PlatformIO' : p.buildSystem === 'keil' ? t('buildKeil') : t('buildMake'))
         : (kind === 'cubemx' ? t('buildNeedMakefile') : t('buildNone'));
       const source = p.source === 'workspace' ? t('sourceWorkspace')
         : p.source === 'settings' ? t('sourceSettings') : '—';
@@ -1256,7 +1179,6 @@ class Stm32FlashViewProvider {
       const flashLabel = method === 'openocd' ? 'OpenOCD' : method === 'keil' ? 'Keil UV4' : 'pyOCD';
 
       // Keil5 模式：用 readiness 数据展示版本和路径
-      const projectMode = (state.cfg || {}).projectMode || 'stm32cube';
       if (projectMode === 'keil5') {
         const r = state.readiness;
         const c = (r && r.compiler) || {};
@@ -1415,6 +1337,9 @@ class Stm32FlashViewProvider {
       setMethod(method, !!state.isWindows, projectMode);
       $('autoDetect').checked = cfg.autoDetectChip !== false;
       $('underReset').checked = !!cfg.connectUnderReset;
+      $('autoDownloadDeps').checked = !!cfg.autoDownloadDependencies;
+      $('dependencyOpts').style.display = projectMode === 'stm32cube' ? '' : 'none';
+      $('btnDeps').style.display = projectMode === 'stm32cube' ? '' : 'none';
 
       const buildReady = !!(readiness && readiness.readyForBuild);
       const flashReady = !!(readiness && readiness.readyForFlash);
@@ -1448,6 +1373,8 @@ class Stm32FlashViewProvider {
       });
       $('autoDetect').disabled = busy;
       $('underReset').disabled = busy;
+      $('autoDownloadDeps').disabled = busy;
+      $('btnDeps').disabled = busy;
 
       renderRecent(state.recent || [], p.dir || '');
 
@@ -1467,34 +1394,27 @@ class Stm32FlashViewProvider {
           hint.className = 'hint warn';
           hint.innerHTML = escapeHtml((state.job || '') + ' ' + t('hintBusy'));
         } else if (readiness && !readiness.readyForBuild) {
-          // pio 未找到：区分安装状态
           if (_pioInstallTriggered && !state.hasPioExtension) {
             hint.className = 'hint warn';
             hint.innerHTML = escapeHtml(t('esp32.pio_ext_installing'));
           } else if (!state.hasPioExtension) {
-            // 有 PlatformIO 工程时自动安装 IDE 扩展（仅触发一次）
-            if (p.hasPlatformIO && !_pioInstallTriggered) {
-              installPio();
-            }
             hint.className = 'hint err';
             hint.innerHTML =
-              escapeHtml(t('esp32.pio_not_found')) +
-              ' <button onclick="installPio()" style="' +
+              escapeHtml((readiness.compiler && readiness.compiler.detail) || t('esp32.pio_not_found')) +
+              ' <button id="btnInstallPio" style="' +
               'margin-left:6px;padding:2px 8px;font-size:10.5px;' +
               'border-radius:3px;border:1px solid var(--btn-bg);' +
               'background:var(--btn-bg);color:var(--btn-fg);cursor:pointer">' +
               escapeHtml(t('esp32.install_pio_ext')) + '</button>';
-          } else if (state.hasPioExtension && readiness.flasher && !readiness.flasher.online) {
-            // 扩展已安装但未激活（刚安装未 reload）
-            hint.className = 'hint warn';
-            hint.innerHTML =
-              escapeHtml(t('esp32.pio_need_reload')) +
-              '<br><small style="color:var(--fg-muted)">' +
-              escapeHtml(t('esp32.pio_restart_hint')) + '</small>';
+            const installButton = $('btnInstallPio');
+            if (installButton) installButton.onclick = installPio;
           } else {
             hint.className = 'hint err';
-            hint.innerHTML = escapeHtml(t('esp32.pio_not_found'));
+            hint.innerHTML = escapeHtml((readiness.compiler && readiness.compiler.detail) || t('esp32.pio_not_found'));
           }
+        } else if (readiness && !readiness.readyForFlash) {
+          hint.className = 'hint err';
+          hint.textContent = (readiness.flasher && readiness.flasher.detail) || t('hintNoFlash');
         } else {
           hint.className = 'hint ok';
           hint.innerHTML = escapeHtml(t('hintReady') + (p.projectKindLabel || 'PlatformIO') + t('hintReadySuffix'));

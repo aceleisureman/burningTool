@@ -41,6 +41,7 @@ function createFlashService(deps) {
 
   /** @type {Promise<any>|null} */
   let readinessTask = null;
+  let readinessGeneration = 0;
 
   function buildProjectState() {
     const resolved = resolveProjectDir ? resolveProjectDir() : { dir: getProjectDir(), source: '' };
@@ -51,7 +52,7 @@ function createFlashService(deps) {
 
   function snapshot() {
     const cfg = state.cfg || {};
-    const shared = cfg._shared || {};
+    const runtime = cfg._runtime || {};
     return {
       ...state,
       project: { ...state.project },
@@ -59,11 +60,10 @@ function createFlashService(deps) {
       recent: (state.recent || []).map((r) => ({ ...r })),
       readiness: state.readiness ? JSON.parse(JSON.stringify(state.readiness)) : null,
       isWindows: process.platform === 'win32',
-      platformId: shared.platformId || (process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'macos' : 'linux'),
+      platformId: runtime.platformId || (process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'macos' : 'linux'),
       hasWorkspace: !!(vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length),
-      toolchainRoot: shared.toolchainRoot || cfg.toolchainRootPath || '',
-      hasToolchain: !!shared.hasToolchain,
-      hasDesktopConfig: !!shared.hasDesktopConfig,
+      toolchainRoot: runtime.toolchainRoot || cfg.toolchainRootPath || '',
+      hasToolchain: !!runtime.hasToolchain,
       locale: locale(),
       // PlatformIO IDE 扩展是否已安装
       hasPioExtension: !!(vscode.extensions.getExtension('platformio.platformio-ide'))
@@ -76,33 +76,40 @@ function createFlashService(deps) {
 
   async function refreshReadiness(force) {
     if (readinessTask && !force) return readinessTask;
+    const generation = ++readinessGeneration;
     state.checking = true;
     emitState();
-    readinessTask = (async () => {
+    const task = (async () => {
       try {
         const cfg = getConfig();
         const dir = getProjectDir();
         const platform = getPlatform(cfg.projectMode || 'stm32cube');
         const readiness = await platform.checkReadiness(cfg, dir);
-        state.readiness = readiness;
-        state.checking = false;
-        emitState();
+        if (generation === readinessGeneration) {
+          state.readiness = readiness;
+          state.checking = false;
+          emitState();
+        }
         return readiness;
       } catch (e) {
-        state.readiness = {
+        const readiness = {
           compiler: { ok: false, label: t('readiness.compiler'), detail: e.message || t('check.fail') },
           flasher:  { ok: false, online: false, label: t('readiness.device'), detail: e.message || t('check.fail') },
           readyForBuild: false, readyForFlash: false, readyForBuildAndFlash: false,
           summary: e.message || t('check.fail')
         };
-        state.checking = false;
-        emitState();
-        return state.readiness;
+        if (generation === readinessGeneration) {
+          state.readiness = readiness;
+          state.checking = false;
+          emitState();
+        }
+        return readiness;
       } finally {
-        readinessTask = null;
+        if (generation === readinessGeneration) readinessTask = null;
       }
     })();
-    return readinessTask;
+    readinessTask = task;
+    return task;
   }
 
   async function refreshState() {
@@ -204,15 +211,11 @@ function createFlashService(deps) {
       return { ok: false, error: t('status.select') };
     }
 
-    if (opts.preflight) {
-      output.show(true);
-      output.append(t('check.section'), 'step');
-      const gate = await ensureReady(opts.preflight);
-      if (!gate.ok) {
-        state.lastResult = 'err';
-        emitState();
-        return { ok: false, error: gate.error };
-      }
+    if (jobLock.isBusy()) {
+      const active = jobLock.getJobState().job;
+      const error = t('task.busy', active ? active.name : 'unknown');
+      output.append(error, 'warn');
+      return { ok: false, busy: true, error };
     }
 
     output.show(true);
@@ -222,7 +225,14 @@ function createFlashService(deps) {
     state.lastResult = null;
     emitState();
 
-    const locked = await jobLock.runExclusive(name, async () => fn({ dir, cfg, output, statusBar, t, platform }));
+    const locked = await jobLock.runExclusive(name, async () => {
+      if (opts.preflight) {
+        output.append(t('check.section'), 'step');
+        const gate = await ensureReady(opts.preflight);
+        if (!gate.ok) return { ok: false, error: gate.error };
+      }
+      return fn({ dir, cfg, output, statusBar, t, platform });
+    });
     if (locked.busy) {
       output.append(t('task.busy', locked.error), 'warn');
       statusBar.setBusy(t('status.busy'));
@@ -304,11 +314,32 @@ function createFlashService(deps) {
     });
   }
 
-  async function doCheckProbe() {
+  async function runDiagnosticJob(name, busyLabel, operation) {
+    if (jobLock.isBusy()) {
+      const active = jobLock.getJobState().job;
+      const error = t('task.busy', active ? active.name : 'unknown');
+      output.append(error, 'warn');
+      return { ok: false, busy: true, error };
+    }
     output.show(true);
-    output.append(t('probe.section'), 'step');
-    statusBar.setBusy(t('status.checking'));
-    try {
+    statusBar.setBusy(busyLabel);
+    state.busy = true;
+    state.job = name;
+    state.lastResult = null;
+    emitState();
+    const locked = await jobLock.runExclusive(name, operation);
+    const result = locked.result || { ok: false, error: locked.error || t('task.fail') };
+    state.busy = false;
+    state.job = '';
+    state.lastResult = result.ok ? 'ok' : 'err';
+    statusBar.setResult(!!result.ok);
+    await refreshState();
+    return result;
+  }
+
+  async function doCheckProbe() {
+    return runDiagnosticJob('check-probe', t('status.checking'), async () => {
+      output.append(t('probe.section'), 'step');
       const cfg = getConfig();
       const platform = getPlatform(cfg.projectMode || 'stm32cube');
       const readiness = await refreshReadiness(true);
@@ -334,34 +365,24 @@ function createFlashService(deps) {
         }
       } else {
         output.append('[检测] 当前模式不支持探针检测', 'info');
-        statusBar.setResult(true);
+        return { ok: true, unsupported: true };
       }
-      await refreshState();
       return r;
-    } catch (e) {
-      output.append(t('err.exception', e.message), 'error');
-      statusBar.setResult(false);
-      return { ok: false, error: e.message };
-    }
+    });
   }
 
   async function doReadChipInfo() {
-    output.show(true);
-    output.append(t('chip.section'), 'step');
-    statusBar.setBusy(t('status.reading_chip'));
-    try {
+    return runDiagnosticJob('read-chip-info', t('status.reading_chip'), async () => {
+      output.append(t('chip.section'), 'step');
       const cfg = getConfig();
       const platform = getPlatform(cfg.projectMode || 'stm32cube');
       const r = platform.readChipInfo ? await platform.readChipInfo(cfg) : null;
-      if (!r) output.append('[芯片] 当前模式不支持芯片信息读取', 'info');
-      statusBar.setResult(!!(r && r.ok !== false));
-      await refreshState();
+      if (!r) {
+        output.append('[芯片] 当前模式不支持芯片信息读取', 'info');
+        return { ok: true, unsupported: true };
+      }
       return r;
-    } catch (e) {
-      output.append(t('err.exception', e.message), 'error');
-      statusBar.setResult(false);
-      return { ok: false, error: e.message };
-    }
+    });
   }
 
   function cancel() {

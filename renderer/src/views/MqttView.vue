@@ -125,15 +125,21 @@
 
 <script>
 import { inject } from 'vue';
+import {
+  Clock, Close, Connection, Delete, EditPen, Plus, Promotion, SwitchButton
+} from '@element-plus/icons-vue';
 import MqttMessages from '../components/MqttMessages.vue';
 import MqttMsgCount from '../components/MqttMsgCount.vue';
 
 export default {
   components: { MqttMessages, MqttMsgCount },
   setup() {
-    const app = inject('appContext');
-    if (!app) throw new Error('appContext is not available');
-    return app;
+    const mqttDomain = inject('mqtt');
+    if (!mqttDomain) throw new Error('mqtt context is not available');
+    return {
+      ...mqttDomain,
+      Clock, Close, Connection, Delete, EditPen, Plus, Promotion, SwitchButton
+    };
   },
 };
 </script>

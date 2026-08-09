@@ -2,9 +2,7 @@
 
 const vscode = require('vscode');
 const {
-  loadDesktopConfig,
-  desktopPathFields,
-  resolveSharedRoots,
+  resolveExtensionRoots,
   expandHome
 } = require('./toolchainShare');
 
@@ -16,80 +14,60 @@ function getSection() {
 
 /**
  * 组装 flash-core 期望的 cfg：
- * VS Code settings 优先，空值回退桌面端 MCU 工具箱 config（含 platformPaths 分平台路径）
+ * 所有配置只来自 VS Code 的 stm32Flash.* 设置。
  */
 function loadFlashConfig() {
   const c = getSection();
   const isWin = process.platform === 'win32';
-  const desktop = loadDesktopConfig();
-  const d = desktopPathFields(desktop);
 
-  // 对 boolean：若用户未改 VS Code 默认，仍可用桌面端值（inspect）
-  const insp = (key) => c.inspect(key);
-  function boolSetting(key, desktopVal, fallback) {
-    const i = insp(key);
-    if (i && (i.workspaceFolderValue !== undefined
-      || i.workspaceValue !== undefined
-      || i.globalValue !== undefined)) {
-      return !!c.get(key);
-    }
-    if (desktopVal !== undefined && desktopVal !== null) return !!desktopVal;
-    return fallback;
+  function boolSetting(key, fallback) {
+    const value = c.get(key);
+    return value == null ? fallback : !!value;
   }
 
-  function stringSetting(key, desktopVal, fallback = '') {
-    const i = insp(key);
-    if (i && (i.workspaceFolderValue !== undefined
-      || i.workspaceValue !== undefined
-      || i.globalValue !== undefined)) {
-      const v = c.get(key);
-      return v == null ? fallback : String(v).trim();
-    }
-    // 未显式配置：桌面端 → 默认
-    if (desktopVal != null && String(desktopVal).trim() !== '') return String(desktopVal).trim();
-    const def = c.get(key);
-    if (def != null && String(def).trim() !== '') return String(def).trim();
-    return fallback;
+  function stringSetting(key, fallback = '') {
+    const value = c.get(key);
+    return value == null ? fallback : String(value).trim();
   }
 
-  const toolchainRootPath = stringSetting('toolchainRootPath', d.toolchainRootPath, '');
-  const roots = resolveSharedRoots({ toolchainRootPath });
+  const toolchainRootPath = stringSetting('toolchainRootPath', '');
+  const roots = resolveExtensionRoots({ toolchainRootPath });
 
   return {
-    targetChip: stringSetting('targetChip', d.targetChip, 'stm32f103c8'),
-    flashMethod: stringSetting('flashMethod', d.flashMethod, 'pyocd'),
-    buildSystem: stringSetting('buildSystem', d.buildSystem, 'auto'),
-    autoDetectChip: boolSetting('autoDetectChip', d.autoDetectChip, true),
-    connectUnderReset: boolSetting('connectUnderReset', d.connectUnderReset, false),
-    elfName: stringSetting('elfName', d.elfName, ''),
-    pyocdPath: expandHome(stringSetting('pyocdPath', d.pyocdPath, '')),
-    openocdPath: expandHome(stringSetting('openocdPath', d.openocdPath, '')),
-    openocdInterface: stringSetting('openocdInterface', d.openocdInterface, 'interface/cmsis-dap.cfg'),
-    armGccPath: expandHome(stringSetting('armGccPath', d.armGccPath, '')),
-    makePath: expandHome(stringSetting('makePath', d.makePath, '')),
+    targetChip: stringSetting('targetChip', 'stm32f103c8'),
+    flashMethod: stringSetting('flashMethod', 'pyocd'),
+    buildSystem: stringSetting('buildSystem', 'auto'),
+    autoDetectChip: boolSetting('autoDetectChip', true),
+    connectUnderReset: boolSetting('connectUnderReset', false),
+    elfName: stringSetting('elfName', ''),
+    pyocdPath: expandHome(stringSetting('pyocdPath', '')),
+    openocdPath: expandHome(stringSetting('openocdPath', '')),
+    openocdInterface: stringSetting('openocdInterface', 'interface/cmsis-dap.cfg'),
+    armGccPath: expandHome(stringSetting('armGccPath', '')),
+    makePath: expandHome(stringSetting('makePath', '')),
     keilUV4Path: expandHome(stringSetting(
       'keilUV4Path',
-      d.keilUV4Path,
       isWin ? String.raw`C:\Keil_v5\UV4\UV4.exe` : ''
     )),
-    keilRebuild: boolSetting('keilRebuild', d.keilRebuild, false),
-    cubeMxPath: expandHome(stringSetting('cubeMxPath', d.cubeMxPath, '')),
+    keilRebuild: boolSetting('keilRebuild', false),
+    cubeMxPath: expandHome(stringSetting('cubeMxPath', '')),
     toolchainRootPath: toolchainRootPath || roots.toolchainRoot,
-    ghProxy: stringSetting('ghProxy', d.ghProxy, ''),
-    // 与桌面端共用已下载工具链时默认 default
-    toolchainMode: stringSetting('toolchainMode', d.toolchainMode, 'default'),
+    ghProxy: stringSetting('ghProxy', ''),
+    toolchainMode: stringSetting('toolchainMode', 'default'),
     // 工程模式：stm32cube / keil5 / esp32
-    projectMode: stringSetting('projectMode', null, 'stm32cube'),
+    projectMode: stringSetting('projectMode', 'stm32cube'),
     // ESP32 子模式：platformio / arduino / idf / micropython
-    esp32SubMode: stringSetting('esp32SubMode', null, 'platformio'),
-    platformPaths: (desktop && desktop.platformPaths) || {},
+    esp32SubMode: stringSetting('esp32SubMode', 'platformio'),
+    serialPort: stringSetting('serialPort', ''),
+    hidePlatformIOToolbar: boolSetting('hidePlatformIOToolbar', true),
+    autoDownloadDependencies: boolSetting('autoDownloadDependencies', false),
+    platformPaths: {},
     // 扩展侧元信息（core 忽略多余字段）
-    _shared: {
+    _runtime: {
       platformId: roots.platformId,
       userDataDir: roots.userDataDir,
       toolchainRoot: roots.toolchainRoot,
       toolsDir: roots.toolsDir,
-      hasDesktopConfig: roots.hasDesktopConfig,
       hasToolchain: roots.hasToolchain
     }
   };

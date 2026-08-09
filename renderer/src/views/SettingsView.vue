@@ -208,7 +208,12 @@
 
             <div class="set-subsection">
               <div class="set-subsection-title">下载与系统</div>
-              <el-form-item label="下载加速镜像">
+              <el-form-item label="应用更新镜像">
+                <el-input v-model="draft.updateFeedUrl" clearable placeholder="可选，如 https://download.example.com/burningTool/" />
+                <span class="set-hint">完整更新源需提供 latest.yml / latest-linux.yml / latest-mac.yml 与安装包，建议同步 blockmap 以保留差分更新；仅支持 HTTPS，镜像失败自动回退官方源。</span>
+              </el-form-item>
+
+              <el-form-item label="工具链下载代理">
                 <el-input v-model="draft.ghProxy" placeholder="可选，如 https://gh-proxy.com；留空直连 GitHub" />
                 <span class="set-hint">工具链默认使用 8 线程分段下载。</span>
               </el-form-item>

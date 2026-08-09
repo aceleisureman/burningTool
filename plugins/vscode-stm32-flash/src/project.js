@@ -29,12 +29,13 @@ function detectProject(dir, cfg) {
     };
   }
 
+  const config = cfg || loadFlashConfig();
   const hasMakefile = fs.existsSync(path.join(dir, 'Makefile'));
   const keilProj = findKeilProject(dir);
   const iocFile  = findIocFile(dir);
   const hasKeil  = !!keilProj;
   const hasIoc   = !!iocFile;
-  const buildSystem = detectBuildSystem(dir, cfg || loadFlashConfig(), keilProj);
+  const buildSystem = detectBuildSystem(dir, config, keilProj);
 
   // 委托各平台处理器做特征检测
   const esp32Extra = getPlatform('esp32').detect(dir);
@@ -50,6 +51,13 @@ function detectProject(dir, cfg) {
   else if (esp32Extra.hasArduino)      { projectKind = 'esp32-arduino';        projectKindLabel = 'ESP32 Arduino 工程'; }
   else if (esp32Extra.hasMicroPython)  { projectKind = 'esp32-micropython';    projectKindLabel = 'ESP32 MicroPython 工程'; }
 
+  const projectMode = config.projectMode || 'stm32cube';
+  const projectValid = projectMode === 'keil5'
+    ? hasKeil
+    : projectMode === 'esp32'
+      ? esp32Extra.hasPlatformIO
+      : hasMakefile;
+
   return {
     exists: true, dir,
     hasMakefile, hasKeil,
@@ -57,7 +65,7 @@ function detectProject(dir, cfg) {
     hasIoc,
     iocFile: iocFile ? path.relative(dir, iocFile) || path.basename(iocFile) : '',
     buildSystem,
-    projectValid: !!(hasMakefile || keilProj || esp32Extra.hasPlatformIO || esp32Extra.hasEspIdf || esp32Extra.hasArduino),
+    projectValid: !!projectValid,
     projectKind, projectKindLabel,
     source: '',
     ...esp32Extra
@@ -180,7 +188,7 @@ async function pickProjectDir() {
 }
 
 /**
- * 将 VS Code 工作区切换到指定工程目录（与 MCU 工具箱历史互通后的项目切换）。
+ * 将 VS Code 工作区切换到指定工程目录。
  * @param {string} dir
  * @param {{ forceNewWindow?: boolean }} [opts]
  * @returns {Promise<{ ok: boolean, same?: boolean, error?: string }>}

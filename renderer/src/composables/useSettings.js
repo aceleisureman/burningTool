@@ -1,4 +1,4 @@
-import { ref, reactive, computed, onMounted } from 'vue';
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue';
 
 // 配置 / 平台 / 工具链：读取&保存配置、平台识别、编译环境与默认工具链安装
 // deps: { appendLog, appShell:{tool,prevTool}, serial, mqtt }
@@ -8,7 +8,7 @@ export function useSettings(deps) {
   const platform = ref('unknown');
   const toolchainProfile = reactive({ label: '', supportsKeil: false, commandTools: { mode: 'system' }, defaultDownloads: { gcc: {}, make: {} }, placeholders: {} });
   const config = reactive({ targetChip: 'stm32f103c8', elfName: '', flashMethod: 'pyocd' });
-  const draft  = reactive({ armGccPath: '', makePath: '', pyocdPath: '', openocdPath: '', targetChip: '', elfName: '', autoDetectChip: true, connectUnderReset: false, toolchainMode: 'custom', toolchainRootPath: '', ghProxy: '', buildSystem: 'auto', keilUV4Path: '', keilRebuild: false, cubeMxPath: '', flashMethod: 'pyocd' });
+  const draft  = reactive({ armGccPath: '', makePath: '', pyocdPath: '', openocdPath: '', targetChip: '', elfName: '', autoDetectChip: true, connectUnderReset: false, toolchainMode: 'custom', toolchainRootPath: '', ghProxy: '', updateFeedUrl: '', buildSystem: 'auto', keilUV4Path: '', keilRebuild: false, cubeMxPath: '', flashMethod: 'pyocd' });
   const settingsVisible = ref(false);
   const envReady   = ref(false);
   const installing = ref(false);
@@ -128,9 +128,21 @@ export function useSettings(deps) {
     } catch (e) { ElMessage.error('选择目录失败：' + (e && e.message ? e.message : e)); }
   }
   function clearToolchainRoot() { draft.toolchainRootPath = ''; }
+  function normalizeUpdateFeedInput(value) {
+    const text = String(value || '').trim();
+    if (!text) return '';
+    let url;
+    try { url = new URL(text); } catch { throw new Error('应用更新镜像地址不是有效的 URL'); }
+    if (url.protocol !== 'https:') throw new Error('应用更新镜像地址必须使用 HTTPS');
+    if (url.username || url.password) throw new Error('应用更新镜像地址不能包含用户名或密码');
+    url.hash = '';
+    if (!url.pathname.endsWith('/')) url.pathname += '/';
+    return url.toString();
+  }
   async function saveSettings() {
     try {
       const plain = JSON.parse(JSON.stringify(draft));
+      plain.updateFeedUrl = normalizeUpdateFeedInput(plain.updateFeedUrl);
       const platformId = toolchainProfile.id || (isWindows.value ? 'windows' : (isLinux.value ? 'linux' : 'macos'));
       plain.platformPaths = Object.assign({}, plain.platformPaths || {});
       plain.platformPaths[platformId] = Object.assign({}, plain.platformPaths[platformId] || {}, {
@@ -343,8 +355,9 @@ export function useSettings(deps) {
     installingDefault.value = false; dlProgress.active = false;
   }
 
+  let offDownloadProgress = null;
   onMounted(() => {
-    window.api.onDownloadProgress((p) => {
+    offDownloadProgress = window.api.onDownloadProgress((p) => {
       const label = p && p.label ? p.label : '';
       const percent = p && typeof p.percent === 'number' ? p.percent : -1;
       dlProgress.label = label;
@@ -357,6 +370,10 @@ export function useSettings(deps) {
       else markToolProgress(key, { status: 'downloading', active: true, percent, note: `下载中 ${percent}%` });
     });
     refreshPathEnv();
+  });
+  onBeforeUnmount(() => {
+    if (typeof offDownloadProgress === 'function') offDownloadProgress();
+    offDownloadProgress = null;
   });
 
   function toolVersionText(key) {

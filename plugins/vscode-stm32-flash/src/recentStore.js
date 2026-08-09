@@ -2,86 +2,80 @@
 
 const fs = require('fs');
 const path = require('path');
-const { findDesktopUserData } = require('./toolchainShare');
+const { getExtensionStorageRoot } = require('./toolchainShare');
 
 const MAX_RECENT = 12;
 
-function configPath() {
-  return path.join(findDesktopUserData(), 'config.json');
+function storagePath() {
+  return path.join(getExtensionStorageRoot(), 'recent-projects.json');
 }
 
-function readDesktopConfigFile() {
-  const p = configPath();
+function normalizeRecentProjects(list) {
+  return (list || [])
+    .map((dir) => String(dir || '').trim())
+    .filter(Boolean)
+    .filter((dir, index, items) => items.indexOf(dir) === index)
+    .slice(0, MAX_RECENT);
+}
+
+function readStore() {
+  const filePath = storagePath();
   try {
-    if (!fs.existsSync(p)) return { path: p, data: {} };
-    const data = JSON.parse(fs.readFileSync(p, 'utf8'));
-    return { path: p, data: data && typeof data === 'object' ? data : {} };
-  } catch {
-    return { path: p, data: {} };
+    if (!fs.existsSync(filePath)) return { filePath, recentProjects: [] };
+    const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    return {
+      filePath,
+      recentProjects: normalizeRecentProjects(data && data.recentProjects)
+    };
+  } catch (error) {
+    return { filePath, recentProjects: [], error };
   }
 }
 
-function writeDesktopConfigFile(filePath, data) {
+function writeStore(filePath, recentProjects) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  const tmp = `${filePath}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
-  fs.renameSync(tmp, filePath);
+  const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  const data = { version: 1, recentProjects: normalizeRecentProjects(recentProjects) };
+  try {
+    fs.writeFileSync(tempPath, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
+    fs.renameSync(tempPath, filePath);
+  } catch (error) {
+    try { fs.unlinkSync(tempPath); } catch { /* ignore cleanup failure */ }
+    throw error;
+  }
+  return data.recentProjects;
 }
 
-/**
- * 读取与 MCU 工具箱共用的历史工程列表（最新在前）
- * @returns {string[]}
- */
 function listRecentProjects() {
-  const { data } = readDesktopConfigFile();
-  const list = Array.isArray(data.recentProjects) ? data.recentProjects : [];
-  return list
-    .map((d) => String(d || '').trim())
-    .filter(Boolean)
-    .filter((d, i, arr) => arr.indexOf(d) === i)
-    .slice(0, MAX_RECENT);
+  return readStore().recentProjects;
 }
 
-/**
- * 写入历史列表到桌面端 config.json（与 MCU 工具箱互通）
- * @param {string[]} list
- */
 function saveRecentProjects(list) {
-  const { path: filePath, data } = readDesktopConfigFile();
-  const next = (list || [])
-    .map((d) => String(d || '').trim())
-    .filter(Boolean)
-    .filter((d, i, arr) => arr.indexOf(d) === i)
-    .slice(0, MAX_RECENT);
-  data.recentProjects = next;
-  writeDesktopConfigFile(filePath, data);
-  return next;
+  const { filePath, error } = readStore();
+  if (error) throw new Error(`Invalid recent project store: ${filePath}`);
+  return writeStore(filePath, list);
 }
 
-/**
- * 置顶添加历史（与桌面 addRecent 行为一致）
- * @param {string} dir
- */
+function updateRecentProjects(change) {
+  const { filePath, recentProjects, error } = readStore();
+  if (error) throw new Error(`Invalid recent project store: ${filePath}`);
+  const next = normalizeRecentProjects(change(recentProjects));
+  if (JSON.stringify(next) === JSON.stringify(recentProjects)) return recentProjects;
+  return writeStore(filePath, next);
+}
+
 function addRecentProject(dir) {
-  const d = String(dir || '').trim();
-  if (!d) return listRecentProjects();
-  const list = listRecentProjects();
-  if (list[0] === d) return list;
-  return saveRecentProjects([d, ...list.filter((x) => x !== d)]);
+  const value = String(dir || '').trim();
+  if (!value) return listRecentProjects();
+  return updateRecentProjects((list) => [value, ...list.filter((item) => item !== value)]);
 }
 
-/**
- * @param {string} dir
- */
 function removeRecentProject(dir) {
-  const d = String(dir || '').trim();
-  if (!d) return listRecentProjects();
-  return saveRecentProjects(listRecentProjects().filter((x) => x !== d));
+  const value = String(dir || '').trim();
+  if (!value) return listRecentProjects();
+  return updateRecentProjects((list) => list.filter((item) => item !== value));
 }
 
-/**
- * 供 UI 展示：带是否存在、显示名
- */
 function listRecentProjectInfos() {
   return listRecentProjects().map((dir) => {
     let exists = false;
@@ -97,7 +91,7 @@ function listRecentProjectInfos() {
 
 module.exports = {
   MAX_RECENT,
-  configPath,
+  storagePath,
   listRecentProjects,
   listRecentProjectInfos,
   addRecentProject,

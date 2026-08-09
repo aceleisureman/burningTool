@@ -50,28 +50,24 @@ code --install-extension plugins/vscode-stm32-flash/mcu-assistant-*.vsix --force
 > `vendor/flash-core` 是打包用拷贝，**不要手改**；源码只改 `packages/flash-core`，再 `npm run ext:sync`。  
 > 版本号写在 `plugins/vscode-stm32-flash/package.json` 的 `version` 字段，打包脚本会自动改写。
 
-## 工具链共用（与 MCU 工具箱）
+## 插件独立存储
 
-扩展与桌面端 **MCU 工具箱** 共用同一套工具链目录与配置，并按系统解析：
+扩展不读取或修改桌面端 MCU 工具箱的 `config.json`。以下数据均由插件独立管理：
 
-| 系统 | 共用 userData / toolchain |
-|------|---------------------------|
-| Windows | `%APPDATA%\\stm32-flasher\\toolchain` |
-| macOS | `~/Library/Application Support/stm32-flasher/toolchain` |
-| Linux | `~/.config/stm32-flasher/toolchain` |
-
-- 桌面端 `config.json` 中的路径（含 `platformPaths.windows|macos|linux`）会作为 **settings 未填写时的回退**
-- `toolchainMode` 默认 `default`：优先用共用目录内已下载的 gcc / pyOCD / OpenOCD
-- 开发态若桌面目录尚无工具链，会回退仓库根 `toolchain/`
-- 也可手动设置 `stm32Flash.toolchainRootPath` 覆盖
+- `stm32Flash.*` 配置保存在 VS Code Settings
+- 最近工程保存在扩展 `globalStorageUri/recent-projects.json`
+- 默认工具链保存在扩展 `globalStorageUri/toolchain/`
+- 辅助工具保存在扩展 `globalStorageUri/tools/`
+- 可手动设置 `stm32Flash.toolchainRootPath`，显式使用其他工具链目录
+- 仓库开发态仍可回退使用仓库根 `toolchain/`
 
 ## 本机依赖
 
 | 工具 | 用途 | 平台说明 |
 |------|------|----------|
-| `make` + `arm-none-eabi-gcc` | Makefile 编译 | Windows 可用工具箱下载的 make；mac/Linux 常用系统 make |
-| `pyocd` | 默认烧录 / 探针 / 芯片识别 | 共用 venv 或 PATH |
-| `openocd` | OpenOCD 烧录 | 共用 xpack 或 brew/apt |
+| `make` + `arm-none-eabi-gcc` | Makefile 编译 | 插件工具链、自定义路径或系统 PATH |
+| `pyocd` | 默认烧录 / 探针 / 芯片识别 | 插件工具链、自定义路径或 PATH |
+| `openocd` | OpenOCD 烧录 | 插件工具链、自定义路径或 brew/apt |
 | Keil `UV4.exe` | Keil 编译烧录 | **仅 Windows** |
 | STM32CubeMX | 从 `.ioc` 生成 Makefile | 三平台路径不同，走分平台配置 |
 
@@ -85,12 +81,15 @@ code --install-extension plugins/vscode-stm32-flash/mcu-assistant-*.vsix --force
   "stm32Flash.targetChip": "stm32f103c8",
   "stm32Flash.flashMethod": "pyocd",
   "stm32Flash.autoDetectChip": true,
+  "stm32Flash.autoDownloadDependencies": false,
   "stm32Flash.connectUnderReset": false,
   "stm32Flash.pyocdPath": "",
   "stm32Flash.openocdPath": "",
   "stm32Flash.cubeMxPath": ""
 }
 ```
+
+`autoDownloadDependencies` 默认关闭。开启后，插件在 STM32Cube 工程检测到默认工具链缺失时会自动下载依赖；也可点击界面中的下载按钮或执行“MCU: 下载缺失依赖”手动下载。下载进度会显示在 VS Code 通知和 `MCU-Assistant` Output 中。ESP32 依赖由 PlatformIO 管理，Keil 使用本机安装。
 
 ## 命令
 
@@ -105,6 +104,7 @@ code --install-extension plugins/vscode-stm32-flash/mcu-assistant-*.vsix --force
 | `STM32: 生成 Makefile` | CubeMX 工程 |
 | `STM32: 取消当前任务` | 结束子进程 |
 | `STM32: 打开日志` | Output 通道 |
+| `MCU: 下载缺失依赖` | 下载 STM32Cube 默认工具链依赖 |
 
 ## 架构
 
@@ -115,11 +115,11 @@ VS Code Extension Host
   → 本机 pyOCD / OpenOCD / make / Keil
 ```
 
-与桌面端 MCU 工具箱共用 `packages/flash-core`，配置由 VS Code settings 注入，不依赖桌面应用 HTTP API。
+插件复用 `packages/flash-core` 的烧录领域逻辑，但配置和持久化完全独立，不依赖桌面应用配置或 HTTP API。
 
 ## 范围说明（v1）
 
-- 仅 **STM32 固件烧录**（不含 StcGal / ESP32）
+- 支持 STM32Cube、Keil5 和 ESP32 PlatformIO 工程
 - 工具链一键下载为可选后续能力；当前推荐本机已安装工具或指定 `toolchainRootPath`
 
 ## 手工验证清单

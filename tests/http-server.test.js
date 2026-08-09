@@ -34,13 +34,17 @@ const cfgPath = path.join(tmpUserData, 'config.json');
 fs.writeFileSync(cfgPath, JSON.stringify({ recentProjects: [tmpProject] }), 'utf8');
 
 const httpApi = require('../src/main/core/http-server');
+const jobLock = require('../src/main/core/job-lock');
 
-function fetchJson(port, method, urlPath, body) {
+function fetchJson(port, method, urlPath, body, extraHeaders) {
   return new Promise((resolve, reject) => {
     const data = body ? Buffer.from(JSON.stringify(body), 'utf8') : null;
     const req = http.request({
       host: '127.0.0.1', port, method, path: urlPath,
-      headers: data ? { 'Content-Type': 'application/json', 'Content-Length': data.length } : {}
+      headers: Object.assign(
+        data ? { 'Content-Type': 'application/json', 'Content-Length': data.length } : {},
+        extraHeaders || {}
+      )
     }, (res) => {
       const chunks = [];
       res.on('data', (c) => chunks.push(c));
@@ -69,6 +73,13 @@ async function waitTaskDone(port, id, timeoutMs = 5000) {
 
 let PORT;
 
+test('start rejects non-loopback bind hosts', async () => {
+  await assert.rejects(
+    httpApi.start({ host: '0.0.0.0', port: 0 }),
+    /仅允许监听本机回环地址/
+  );
+});
+
 test('start binds to 127.0.0.1 on requested port', async () => {
   const bound = await httpApi.start({ host: '127.0.0.1', port: 0 });
   assert.strictEqual(bound.host, '127.0.0.1');
@@ -84,6 +95,15 @@ test('GET /api/health returns ok', async () => {
   assert.strictEqual(r.status, 200);
   assert.strictEqual(r.body.ok, true);
   assert.strictEqual(r.body.service, 'mcu-toolbox');
+});
+
+test('cross-site browser requests are rejected', async () => {
+  const r = await fetchJson(PORT, 'POST', '/api/build-flash', null, {
+    Origin: 'https://example.com',
+    'Sec-Fetch-Site': 'cross-site'
+  });
+  assert.strictEqual(r.status, 403);
+  assert.match(r.body.error, /cross-site/);
 });
 
 test('GET /api/current shows the recent-most project', async () => {
@@ -113,6 +133,28 @@ test('POST /api/build runs only compile', async () => {
   assert.strictEqual(task.status, 'succeeded');
   assert.strictEqual(task.buildOk, true);
   assert.strictEqual(task.flashOk, null);
+});
+
+test('HTTP tasks wait for the shared global job lock', async () => {
+  let releaseBlocker;
+  let notifyAcquired;
+  const acquired = new Promise((resolve) => { notifyAcquired = resolve; });
+  const blocker = jobLock.runExclusive('desktop-build', async () => {
+    notifyAcquired();
+    await new Promise((resolve) => { releaseBlocker = resolve; });
+    return true;
+  });
+  await acquired;
+
+  const r = await fetchJson(PORT, 'POST', '/api/build');
+  assert.strictEqual(r.status, 202);
+  const queued = await fetchJson(PORT, 'GET', `/api/task/${r.body.taskId}`);
+  assert.strictEqual(queued.body.task.status, 'queued');
+
+  releaseBlocker();
+  await blocker;
+  const task = await waitTaskDone(PORT, r.body.taskId);
+  assert.strictEqual(task.status, 'succeeded');
 });
 
 test('POST /api/build-flash with unknown projectDir returns 400', async () => {

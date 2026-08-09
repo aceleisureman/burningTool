@@ -1,4 +1,4 @@
-// 应用内自动更新（对接主进程 updater.js / GitHub Releases）
+// 应用内自动更新（对接主进程 updater.js / GitHub Releases 或自定义镜像）
 import { ref, reactive, onUnmounted } from 'vue';
 
 export function useUpdate() {
@@ -8,7 +8,8 @@ export function useUpdate() {
     version: null,       // 可更新到的版本
     percent: 0,
     error: null,
-    platform: ''
+    platform: '',
+    source: null         // github | mirror | github-fallback
   });
   const updateChecking = ref(false);
   const updateInstalling = ref(false);
@@ -43,6 +44,8 @@ export function useUpdate() {
     updateChecking.value = true;
     updateState.status = 'checking';
     updateState.error = null;
+    // 主进程会等待镜像下载及官方回退完成；提前轮询，确保推送通道异常时仍能显示进度。
+    startPoll();
     try {
       const r = await window.api.updateCheck();
       if (r && r.ok === false) {
@@ -50,14 +53,13 @@ export function useUpdate() {
         updateState.error = r.error || '检查失败';
       } else {
         if (r && r.state) applyState(r.state);
-        // 推送通道已接好时轮询仅作短时兜底
-        startPoll();
       }
     } catch (e) {
       updateState.status = 'error';
       updateState.error = String(e && e.message || e);
     } finally {
       updateChecking.value = false;
+      if (['latest', 'downloaded', 'error', 'idle', 'installing'].includes(updateState.status)) stopPoll();
     }
   }
 

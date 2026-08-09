@@ -11,6 +11,7 @@ const path = require('path');
 const fs = require('fs');
 const { EventEmitter } = require('events');
 const os = require('os');
+const { pathToFileURL } = require('url');
 
 const _projectRoot = path.resolve(__dirname, '..');
 
@@ -41,37 +42,67 @@ const dialog = {
  * ─────────────────────────────────────────────────────── */
 process.__mcutoolboxIpc = process.__mcutoolboxIpc || new EventEmitter();
 process.__mcutoolboxReplies = process.__mcutoolboxReplies || {};
+process.__mcutoolboxReplyTimers = process.__mcutoolboxReplyTimers || {};
 const _ipcCh = process.__mcutoolboxIpc;
 const _ipcReplies = process.__mcutoolboxReplies;
+const _ipcReplyTimers = process.__mcutoolboxReplyTimers;
+
+function clearReplyTimer(replyId) {
+  if (!_ipcReplyTimers[replyId]) return;
+  clearTimeout(_ipcReplyTimers[replyId]);
+  delete _ipcReplyTimers[replyId];
+}
 
 const ipcRenderer = {
   invoke(channel, ...args) {
     return new Promise((resolve) => {
       const replyId = 'r:' + channel + ':' + Date.now() + ':' + Math.random().toString(36).slice(2, 6);
       _ipcReplies[replyId] = resolve;
-      setTimeout(() => {
-        if (_ipcReplies[replyId]) { delete _ipcReplies[replyId]; resolve(undefined); }
+      const timer = setTimeout(() => {
+        if (_ipcReplies[replyId]) { delete _ipcReplies[replyId]; delete _ipcReplyTimers[replyId]; resolve(undefined); }
       }, 30000);
+      _ipcReplyTimers[replyId] = timer;
+      if (timer.unref) timer.unref();
       _ipcCh.emit('main:' + channel, { replyId, args });
     });
   },
   send(channel, ...args) { _ipcCh.emit('main:' + channel, { args }); },
   sendSync() { return undefined; },
   on(channel, fn) {
-    const wrapped = (...a) => fn(...a);
-    _ipcCh.on('renderer:' + channel, wrapped);
-    return { remove: () => _ipcCh.removeListener('renderer:' + channel, wrapped) };
+    _ipcCh.on('renderer:' + channel, fn);
+    return this;
   },
   once(channel, fn) {
-    const wrapped = (...a) => fn(...a);
-    _ipcCh.once('renderer:' + channel, wrapped);
-    return { remove: () => _ipcCh.removeListener('renderer:' + channel, wrapped) };
+    _ipcCh.once('renderer:' + channel, fn);
+    return this;
   },
-  removeListener(channel, fn) { _ipcCh.removeListener('renderer:' + channel, fn); },
-  removeAllListeners(channel) { _ipcCh.removeAllListeners('renderer:' + channel); },
+  removeListener(channel, fn) {
+    _ipcCh.removeListener('renderer:' + channel, fn);
+    return this;
+  },
+  removeAllListeners(channel) {
+    _ipcCh.removeAllListeners('renderer:' + channel);
+    return this;
+  },
 };
 
 class IpcMain extends EventEmitter {
+  constructor() {
+    super();
+    this._eventWrappers = new Map();
+  }
+  _remember(channel, listener, wrapped) {
+    if (!this._eventWrappers.has(channel)) this._eventWrappers.set(channel, new Map());
+    this._eventWrappers.get(channel).set(listener, wrapped);
+  }
+  _forget(channel, listener) {
+    const listeners = this._eventWrappers.get(channel);
+    if (!listeners) return null;
+    const wrapped = listeners.get(listener) || null;
+    listeners.delete(listener);
+    if (!listeners.size) this._eventWrappers.delete(channel);
+    return wrapped;
+  }
   handle(channel, listener) {
     const wrapped = async (msg) => {
       const { replyId, args } = msg || {};
@@ -80,12 +111,14 @@ class IpcMain extends EventEmitter {
         if (replyId && _ipcReplies[replyId]) {
           _ipcReplies[replyId](result);
           delete _ipcReplies[replyId];
+          clearReplyTimer(replyId);
         }
         if (replyId) _ipcCh.emit('renderer:' + channel + ':r:' + replyId, result);
       } catch (err) {
         if (replyId && _ipcReplies[replyId]) {
           _ipcReplies[replyId]({ error: err.message });
           delete _ipcReplies[replyId];
+          clearReplyTimer(replyId);
         }
       }
     };
@@ -93,11 +126,28 @@ class IpcMain extends EventEmitter {
   }
   on(channel, listener) {
     const wrapped = (msg) => listener(null, ...(msg && msg.args || []));
+    this._remember(channel, listener, wrapped);
     _ipcCh.on('main:' + channel, wrapped);
+    return this;
   }
-  once(channel, listener) { _ipcCh.once('main:' + channel, listener); }
-  removeListener(channel, listener) { _ipcCh.removeListener('main:' + channel, listener); }
-  removeAllListeners(channel) { _ipcCh.removeAllListeners('main:' + channel); }
+  once(channel, listener) {
+    const wrapped = (msg) => {
+      this._forget(channel, listener);
+      listener(null, ...(msg && msg.args || []));
+    };
+    this._remember(channel, listener, wrapped);
+    _ipcCh.once('main:' + channel, wrapped);
+    return this;
+  }
+  removeListener(channel, listener) {
+    _ipcCh.removeListener('main:' + channel, this._forget(channel, listener) || listener);
+    return this;
+  }
+  removeAllListeners(channel) {
+    _ipcCh.removeAllListeners('main:' + channel);
+    this._eventWrappers.delete(channel);
+    return this;
+  }
 }
 const ipcMain = new IpcMain();
 
@@ -114,7 +164,7 @@ app.whenReady = () => _readyPromise;
 
 let _singleInstanceLock = false;
 app.requestSingleInstanceLock = () => {
-  if (_singleInstanceLock) return true;
+  if (_singleInstanceLock) return false;
   _singleInstanceLock = true;
   return true;
 };
@@ -140,12 +190,6 @@ app.getLocale = () => 'zh-CN';
 app.getName = () => 'MCU工具箱';
 app.getVersion = () => '1.0.0';
 app.isPackaged = false;
-app.on = (event, listener) => app.addListener(event, listener);
-app.once = (event, listener) => app.once(event, listener);
-app.removeListener = (event, listener) => app.removeListener(event, listener);
-app.removeAllListeners = (event) => app.removeAllListeners(event);
-app.addListener = app.addListener.bind(app);
-app.removeListener = app.removeListener.bind(app);
 
 // 延迟触发 ready
 setTimeout(() => { _readyResolve(); }, 100);
@@ -161,13 +205,16 @@ class BrowserWindow extends EventEmitter {
     this.webContents = new EventEmitter();
     this.webContents.send = (channel, ...args) => {
       // 在 mock 模式下通过 IPC 转发到 preload/渲染进程
-      _ipcCh.emit('renderer:' + channel, ...args);
+      _ipcCh.emit('renderer:' + channel, null, ...args);
     };
+    this.webContents.getURL = () => this._url || '';
     this.webContents.executeJavaScript = () => Promise.resolve(null);
     this.webContents.loadURL = (url) => {
+      this._url = url;
       this.webContents.emit('did-start-loading');
       const self = this;
       setTimeout(() => {
+        if (self.isDestroyed()) return;
         self.webContents.emit('did-finish-load');
         self.show();
         self.emit('ready-to-show');
@@ -175,7 +222,7 @@ class BrowserWindow extends EventEmitter {
       return Promise.resolve();
     };
     this.webContents.loadFile = (filePath) => {
-      return this.loadURL('file://' + filePath);
+      return this.loadURL(pathToFileURL(filePath).toString());
     };
     this.webContents.setWindowOpenHandler = () => ({ action: 'deny' });
     this.webContents.session = {
@@ -186,12 +233,14 @@ class BrowserWindow extends EventEmitter {
     this.webContents.setBackgroundColor = () => {};
     this.webContents.openDevTools = () => {};
     this.webContents.reloadIgnoringCache = () => {
+      if (this.isDestroyed()) return Promise.resolve();
       this.webContents.emit('did-finish-load');
       return Promise.resolve();
     };
 
     this._opts = opts;
     this._visible = false;
+    this._focused = false;
     this._destroyed = false;
     this._menuBarVisible = true;
     this._bounds = { x: 100, y: 100, width: 1200, height: 800 };
@@ -203,36 +252,57 @@ class BrowserWindow extends EventEmitter {
 
   loadURL(url) {
     this._loaded = true;
+    this._url = url;
     this.webContents.emit('did-start-loading');
     const self = this;
     setTimeout(() => {
+      if (self.isDestroyed()) return;
       self.webContents.emit('did-finish-load');
       self.show();
       self.emit('ready-to-show');
     }, 50);
     return Promise.resolve();
   }
-  loadFile(fp) { return this.loadURL('file://' + fp); }
+  loadFile(fp) { return this.loadURL(pathToFileURL(fp).toString()); }
 
-  on(event, listener) { super.on(event, listener); }
-  once(event, listener) { super.once(event, listener); }
-  removeListener(event, listener) { super.removeListener(event, listener); }
-  removeAllListeners(event) { super.removeAllListeners(event); }
+  on(event, listener) { return super.on(event, listener); }
+  once(event, listener) { return super.once(event, listener); }
+  removeListener(event, listener) { return super.removeListener(event, listener); }
+  removeAllListeners(event) { return super.removeAllListeners(event); }
 
   show() {
     this._visible = true;
+    this.emit('show');
     this.webContents.emit('did-show');
   }
-  hide() { this._visible = false; }
+  hide() { this._visible = false; this._focused = false; this.emit('hide'); }
   close() {
+    if (this._destroyed) return;
+    const event = {
+      defaultPrevented: false,
+      preventDefault() { this.defaultPrevented = true; }
+    };
+    this.emit('close', event);
+    if (event.defaultPrevented) return;
     this._destroyed = true;
+    this._visible = false;
+    this._focused = false;
     const idx = _windows.indexOf(this);
     if (idx >= 0) _windows.splice(idx, 1);
+    this.emit('closed');
+    this.webContents.emit('destroyed');
     this.webContents.emit('did-close');
-    app.emit('window-all-closed');
-    if (_windows.length === 0) _clearKeepAlive();
+    if (_windows.length === 0) {
+      _clearKeepAlive();
+      app.emit('window-all-closed');
+    }
   }
-  focus() {}
+  focus() {
+    for (const win of _windows) win._focused = false;
+    this._focused = true;
+    this._visible = true;
+    this.emit('focus');
+  }
   setMenuBarVisibility(v) { this._menuBarVisible = v; }
   getMenuBarVisibility() { return this._menuBarVisible !== false; }
   getBounds() { return { ...this._bounds }; }
@@ -249,7 +319,7 @@ class BrowserWindow extends EventEmitter {
   restore() {}
   isMaximized() { return false; }
   isMinimized() { return false; }
-  isFocused() { return this._visible; }
+  isFocused() { return this._focused; }
   isVisible() { return this._visible; }
   setFullScreen() {}
   isFullScreen() { return false; }
@@ -270,14 +340,11 @@ class BrowserWindow extends EventEmitter {
   setAlwaysOnTop(flag) { this._alwaysOnTop = flag; }
   isAlwaysOnTop() { return this._alwaysOnTop === true; }
 
-  // webContents delegation
-  on(event, fn) { this.webContents.on(event, fn); }
-  once(event, fn) { this.webContents.once(event, fn); }
-  removeListener(event, fn) { this.webContents.removeListener(event, fn); }
 }
 
 BrowserWindow.getAllWindows = () => [..._windows];
 BrowserWindow.getAllWebContents = () => _windows.flatMap(w => [w.webContents]);
+BrowserWindow.getFocusedWindow = () => _windows.find((win) => win.isFocused()) || null;
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();

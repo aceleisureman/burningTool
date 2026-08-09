@@ -252,7 +252,7 @@
 </template>
 
 <script>
-import { ref, onMounted, provide } from 'vue';
+import { ref, onMounted, provide, defineAsyncComponent } from 'vue';
 // ElMessage / ElMessageBox 由 unplugin-auto-import + ElementPlusResolver 自动注入（含样式）
 // 图标按需引入：仅 import 模板返回用到的图标（其余 PascalCase/动态 :is 图标由 main.js 全局注册）
 import {
@@ -277,17 +277,17 @@ import { useRamLog } from './composables/useRamLog.js';
 import { useFirmwareAnalysis } from './composables/useFirmwareAnalysis.js';
 import { useUpdate } from './composables/useUpdate.js';
 // 工具页面按域拆分，App 仅负责应用外壳与状态装配。
-import FlashView from './views/FlashView.vue';
-import Stc51View from './views/Stc51View.vue';
-import Esp32View from './views/Esp32View.vue';
-import HardwareView from './views/HardwareView.vue';
-import RamLogView from './views/RamLogView.vue';
-import FirmwareView from './views/FirmwareView.vue';
-import SerialView from './views/SerialView.vue';
-import MqttView from './views/MqttView.vue';
-import GlyphView from './views/GlyphView.vue';
-import CrcView from './views/CrcView.vue';
-import SettingsView from './views/SettingsView.vue';
+const FlashView = defineAsyncComponent(() => import('./views/FlashView.vue'));
+const Stc51View = defineAsyncComponent(() => import('./views/Stc51View.vue'));
+const Esp32View = defineAsyncComponent(() => import('./views/Esp32View.vue'));
+const HardwareView = defineAsyncComponent(() => import('./views/HardwareView.vue'));
+const RamLogView = defineAsyncComponent(() => import('./views/RamLogView.vue'));
+const FirmwareView = defineAsyncComponent(() => import('./views/FirmwareView.vue'));
+const SerialView = defineAsyncComponent(() => import('./views/SerialView.vue'));
+const MqttView = defineAsyncComponent(() => import('./views/MqttView.vue'));
+const GlyphView = defineAsyncComponent(() => import('./views/GlyphView.vue'));
+const CrcView = defineAsyncComponent(() => import('./views/CrcView.vue'));
+const SettingsView = defineAsyncComponent(() => import('./views/SettingsView.vue'));
 
 export default {
   components: { FlashView, Stc51View, Esp32View, HardwareView, RamLogView, FirmwareView, SerialView, MqttView, GlyphView, CrcView, SettingsView },

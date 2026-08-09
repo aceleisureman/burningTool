@@ -2,7 +2,7 @@
   "name": "mcu-assistant",
   "displayName": "%ext.displayName%",
   "description": "%ext.description%",
-  "version": "0.1.45",
+  "version": "0.1.49",
   "publisher": "leisureman",
   "engines": {
     "vscode": "^1.85.0"
@@ -21,8 +21,10 @@
     "onCommand:stm32Flash.checkProbe",
     "onCommand:stm32Flash.readChipInfo",
     "onCommand:stm32Flash.cancel",
+    "onCommand:stm32Flash.selectSerialPort",
     "onCommand:stm32Flash.openOutput",
-    "onCommand:stm32Flash.openSettings"
+    "onCommand:stm32Flash.openSettings",
+    "onCommand:stm32Flash.installDependencies"
   ],
   "main": "./src/extension.js",
   "contributes": {
@@ -78,6 +80,12 @@
         "category": "STM32 Flash"
       },
       {
+        "command": "stm32Flash.selectSerialPort",
+        "title": "%cmd.selectSerialPort%",
+        "category": "STM32 Flash",
+        "icon": "$(plug)"
+      },
+      {
         "command": "stm32Flash.openOutput",
         "title": "%cmd.openOutput%",
         "category": "STM32 Flash"
@@ -86,6 +94,12 @@
         "command": "stm32Flash.openSettings",
         "title": "%cmd.openSettings%",
         "category": "STM32 Flash"
+      },
+      {
+        "command": "stm32Flash.installDependencies",
+        "title": "%cmd.installDependencies%",
+        "category": "STM32 Flash",
+        "icon": "$(cloud-download)"
       }
     ],
     "viewsContainers": {
@@ -247,13 +261,28 @@
           ],
           "default": "platformio",
           "description": "%cfg.esp32SubMode.desc%"
+        },
+        "stm32Flash.serialPort": {
+          "type": "string",
+          "default": "",
+          "description": "%cfg.serialPort.desc%"
+        },
+        "stm32Flash.hidePlatformIOToolbar": {
+          "type": "boolean",
+          "default": true,
+          "description": "%cfg.hidePlatformIOToolbar.desc%"
+        },
+        "stm32Flash.autoDownloadDependencies": {
+          "type": "boolean",
+          "default": false,
+          "description": "%cfg.autoDownloadDependencies.desc%"
         }
       }
     }
   },
   "scripts": {
     "lint": "eslint src/",
-    "package": "npx --yes @vscode/vsce package --no-dependencies --allow-missing-repository"
+    "package": "node scripts/package.js"
   },
   "dependencies": {},
   "license": "UNLICENSED",

@@ -2,14 +2,15 @@
 // POST /api/build-flash 触发当前选中项目的一键编译烧录。
 //
 // 设计要点：
-//  - 仅监听 127.0.0.1，无鉴权（信任本机进程）
+//  - 仅监听回环地址；拒绝跨站浏览器请求，避免网页静默触发烧录
 //  - 异步任务模型：POST 立刻返回 { taskId }，GET /api/task/:id 拉进度/日志
-//  - 编译/烧录本身互斥，任务在内部队列里串行执行，避免并发抢 make / SWD
+//  - HTTP 内部队列与桌面 IPC 共用全局 jobLock，避免并发抢 make / SWD
 //  - 每个任务运行期间通过 bus.addExtraSink 旁路截取渲染端日志，作为任务日志留存
 
 const http = require('http');
 const path = require('path');
 const bus = require('./bus');
+const jobLock = require('./job-lock');
 const { loadConfig, addRecent } = require('./config');
 const {
   compile,
@@ -20,6 +21,50 @@ const {
 } = require('../flash/flasher');
 const fs = require('fs');
 
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
+
+function isLoopbackHostname(value) {
+  const host = String(value || '').trim().replace(/^\[|\]$/g, '').toLowerCase();
+  return host === 'localhost' || host === '::1' || /^127(?:\.\d{1,3}){3}$/.test(host);
+}
+
+function normalizeLoopbackHost(value) {
+  const host = String(value || '127.0.0.1').trim().toLowerCase();
+  if (!LOOPBACK_HOSTS.has(host)) {
+    throw new Error('HTTP API 仅允许监听本机回环地址（127.0.0.1 / localhost / ::1）');
+  }
+  return host === 'localhost' ? '127.0.0.1' : host;
+}
+
+function isLoopbackRemoteAddress(value) {
+  const address = String(value || '').trim().toLowerCase();
+  return address === '::1' || address.startsWith('127.') || address.startsWith('::ffff:127.');
+}
+
+function isLoopbackHostHeader(value) {
+  try {
+    return isLoopbackHostname(new URL('http://' + String(value || '')).hostname);
+  } catch {
+    return false;
+  }
+}
+
+function isAllowedBrowserOrigin(req) {
+  const fetchSite = String(req.headers['sec-fetch-site'] || '').trim().toLowerCase();
+  if (fetchSite === 'cross-site') return false;
+
+  const origin = String(req.headers.origin || '').trim();
+  if (!origin) return true; // curl、IDE、脚本等本机客户端通常不发送 Origin
+  if (origin === 'null') return false;
+  try {
+    const parsed = new URL(origin);
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:')
+      && isLoopbackHostname(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
 /* ── 任务表：id -> task ─────────────────────────────────
  * task = { id, mode, projectDir, status, buildOk, flashOk, error,
  *          log:[{t,text,type}], createdAt, startedAt, finishedAt }
@@ -28,6 +73,8 @@ const fs = require('fs');
 const _tasks = new Map();
 const _queue = [];
 let _running = null;
+let _draining = false;
+let _drainTimer = null;
 let _idSeq = 0;
 function newTaskId() {
   const now = new Date();
@@ -103,26 +150,45 @@ function enqueue(mode, projectDir) {
       .sort((a, b) => a.createdAt - b.createdAt);
     for (const old of oldest.slice(0, _tasks.size - 50)) _tasks.delete(old.id);
   }
-  drain();
+  scheduleDrain();
   return task;
 }
 
-async function drain() {
-  if (_running) return;
-  const task = _queue.shift();
-  if (!task) return;
+function scheduleDrain(delayMs = 0) {
+  if (_drainTimer) return;
+  _drainTimer = setTimeout(() => {
+    _drainTimer = null;
+    drain();
+  }, delayMs);
+}
+
+async function executeTask(task) {
   _running = task;
   task.status = 'running';
   task.startedAt = Date.now();
 
+  const maxLogEntryChars = 64 * 1024;
+  const maxTaskLogChars = 4 * 1024 * 1024;
+  const trimTaskLogChars = 3 * 1024 * 1024;
+  let taskLogChars = 0;
   const captureLog = (text, type) => {
-    task.log.push({ t: Date.now(), text: String(text || ''), type: type || 'info' });
-    // 单任务日志上限：防止长时间跑爆内存
-    if (task.log.length > 5000) task.log.splice(0, task.log.length - 5000);
+    const raw = String(text || '');
+    const clipped = raw.length > maxLogEntryChars ? raw.slice(0, maxLogEntryChars) + '\n… [日志内容已截断]' : raw;
+    task.log.push({ t: Date.now(), text: clipped, type: type || 'info' });
+    taskLogChars += clipped.length;
+    // 同时按条数和总字符数收敛，避免少量超长行绕过条数上限。
+    if (task.log.length > 5000 || taskLogChars > maxTaskLogChars) {
+      let removeCount = 0;
+      while (task.log.length - removeCount > 1 &&
+             (task.log.length - removeCount > 4000 || taskLogChars > trimTaskLogChars)) {
+        taskLogChars -= task.log[removeCount++].text.length;
+      }
+      if (removeCount) task.log.splice(0, removeCount);
+    }
   };
   const off = bus.addExtraSink({
     send: (text, type) => captureLog(text, type),
-    sendProgress: (key, text) => captureLog(text, 'progress')
+    sendProgress: (_key, text) => captureLog(text, 'progress')
   });
 
   try {
@@ -156,8 +222,28 @@ async function drain() {
     task.finishedAt = Date.now();
     off();
     _running = null;
-    // 继续下一个
-    setImmediate(drain);
+  }
+}
+
+async function drain() {
+  if (_draining) return;
+  const task = _queue.shift();
+  if (!task) return;
+  _draining = true;
+  try {
+    const locked = await jobLock.runExclusive(`http-${task.mode}`, () => executeTask(task));
+    if (locked.busy) {
+      // 桌面端其他 IPC 正在执行独占任务：保持 HTTP 任务 queued，稍后重试。
+      _queue.unshift(task);
+      scheduleDrain(100);
+    } else if (locked.ok === false && task.status === 'queued') {
+      task.status = 'failed';
+      task.error = locked.error || 'global job failed';
+      task.finishedAt = Date.now();
+    }
+  } finally {
+    _draining = false;
+    if (task.status !== 'queued') scheduleDrain();
   }
 }
 
@@ -176,12 +262,25 @@ function readBody(req, limit = 64 * 1024) {
   return new Promise((resolve, reject) => {
     let size = 0;
     const chunks = [];
-    req.on('data', (c) => {
+    let finished = false;
+    const onData = (c) => {
+      if (finished) return;
       size += c.length;
-      if (size > limit) { reject(new Error('payload too large')); req.destroy(); return; }
+      if (size > limit) {
+        finished = true;
+        req.removeListener('data', onData);
+        req.resume();
+        const error = new Error('payload too large');
+        error.statusCode = 413;
+        reject(error);
+        return;
+      }
       chunks.push(c);
-    });
+    };
+    req.on('data', onData);
     req.on('end', () => {
+      if (finished) return;
+      finished = true;
       if (!chunks.length) return resolve({});
       try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); }
       catch (e) { reject(new Error('invalid json: ' + e.message)); }
@@ -194,9 +293,15 @@ async function handle(req, res) {
   const url = new URL(req.url, 'http://127.0.0.1');
   const p = url.pathname.replace(/\/+$/, '') || '/';
 
-  // 只处理本机来源（回环网卡）—— 双保险
-  if (req.socket && req.socket.remoteAddress && !/^(127\.|::1|::ffff:127\.)/.test(req.socket.remoteAddress)) {
+  // 三层本机限制：连接地址、Host、浏览器 Origin/Sec-Fetch-Site。
+  if (req.socket && req.socket.remoteAddress && !isLoopbackRemoteAddress(req.socket.remoteAddress)) {
     return json(res, 403, { ok: false, error: 'forbidden: local only' });
+  }
+  if (!isLoopbackHostHeader(req.headers.host)) {
+    return json(res, 403, { ok: false, error: 'forbidden: loopback host required' });
+  }
+  if (!isAllowedBrowserOrigin(req)) {
+    return json(res, 403, { ok: false, error: 'forbidden: cross-site browser request' });
   }
 
   if (req.method === 'GET' && p === '/api/health') {
@@ -236,7 +341,7 @@ async function handle(req, res) {
   if (req.method === 'POST' && (p === '/api/build-flash' || p === '/api/build' || p === '/api/flash')) {
     let body = {};
     try { body = await readBody(req); }
-    catch (e) { return json(res, 400, { ok: false, error: e.message }); }
+    catch (e) { return json(res, e.statusCode === 413 ? 413 : 400, { ok: false, error: e.message }); }
     const dir = (body && body.projectDir) || currentProject();
     if (!dir) return json(res, 400, { ok: false, error: 'no project selected: pass "projectDir" or select one in the UI first' });
     const info = detectProject(dir);
@@ -258,7 +363,12 @@ let _bound = null;
 
 function start(opts = {}) {
   if (_server) return Promise.resolve(_bound);
-  const host = opts.host || '127.0.0.1';
+  let host;
+  try {
+    host = normalizeLoopbackHost(opts.host);
+  } catch (e) {
+    return Promise.reject(e);
+  }
   const port = opts.port ?? 27080;
   return new Promise((resolve, reject) => {
     const srv = http.createServer((req, res) => {

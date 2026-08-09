@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { runProcess, killAllRunningProcesses, activeProcessCount } = require('../src/main/toolchain/proc');
+const { runProcess, runCapture, killAllRunningProcesses, activeProcessCount } = require('../src/main/toolchain/proc');
 
 test('runProcess returns timedOut result when command exceeds timeout', async () => {
   const result = await runProcess(
@@ -28,4 +28,42 @@ test('killAllRunningProcesses terminates tracked children', async () => {
   assert.ok(killed.killed >= 1);
   const result = await pending;
   assert.notEqual(result.code, 0);
+});
+
+test('runCapture bounds captured output and keeps the tail', async () => {
+  const result = await runCapture(
+    process.execPath,
+    ['-e', "process.stdout.write('A'.repeat(4096) + 'TAIL')"],
+    { shell: false, maxCaptureBytes: 1024 }
+  );
+
+  assert.equal(result.code, 0);
+  assert.equal(result.truncated, true);
+  assert.match(result.out, /前部内容已截断/);
+  assert.equal(result.out.endsWith('TAIL'), true);
+  assert.ok(Buffer.byteLength(result.out, 'utf8') < 1300);
+});
+
+test('runProcess bounds a long line without waiting for a newline', async () => {
+  const result = await runProcess(
+    process.execPath,
+    ['-e', "process.stdout.write('B'.repeat(4096) + 'END')"],
+    { shell: false, capture: true, maxCaptureBytes: 1024, maxLineChars: 256 }
+  );
+
+  assert.equal(result.code, 0);
+  assert.equal(result.truncated, true);
+  assert.equal(result.out.trimEnd().endsWith('END'), true);
+});
+
+test('capture truncation keeps valid UTF-8 at the retained boundary', async () => {
+  const result = await runCapture(
+    process.execPath,
+    ['-e', "process.stdout.write('中'.repeat(1000) + '结尾')"],
+    { shell: false, maxCaptureBytes: 1025 }
+  );
+
+  assert.equal(result.truncated, true);
+  assert.equal(result.out.includes('\uFFFD'), false);
+  assert.equal(result.out.endsWith('结尾'), true);
 });
