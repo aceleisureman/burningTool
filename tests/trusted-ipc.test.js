@@ -14,5 +14,8 @@ test('trusted IPC guard accepts only the active main window sender', async () =>
 
   const handler = handlers.get('demo');
   assert.strictEqual(await handler({ sender: webContents, senderFrame: { url: webContents.getURL() } }, 3), 6);
-  await assert.rejects(() => handler({ sender: { getURL: webContents.getURL }, senderFrame: { url: webContents.getURL() } }, 3), /untrusted IPC/);
+  assert.throws(
+    () => handler({ sender: { getURL: webContents.getURL }, senderFrame: { url: webContents.getURL() } }, 3),
+    /untrusted IPC/
+  );
 });
