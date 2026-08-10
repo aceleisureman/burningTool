@@ -185,7 +185,7 @@
                    width="760px" append-to-body destroy-on-close>
           <el-tabs v-model="quickFormatTab" class="qf-tabs">
             <el-tab-pane label="参数说明" name="fields">
-              <div class="qf-structure">推荐结构：顶层为分组数组，每个分组包含一个 <code>cmds</code> 指令数组。</div>
+              <div class="qf-structure">版本化追加格式：顶层包含 <code>schema</code>、<code>version</code>、<code>mode</code> 和 <code>groups</code>，导入不会覆盖已有指令。</div>
               <div class="qf-field-grid qf-field-head" aria-hidden="true">
                 <span>层级</span><span>参数</span><span>类型</span><span>必填</span><span>备注</span>
               </div>

@@ -105,7 +105,15 @@ async function runUV4(cfg, projectDir, op /* 'build' | 'flash' */) {
   bus.send(`[${op === 'flash' ? '烧录' : '编译'}] UV4 ${cmdFlag} "${path.basename(proj)}" ...`, 'step');
   // UV4 只把输出写进 -o 日志文件，编译期间轮询该文件、把新增的完整行实时推送到前端
   let sentLines = 0;
+  let lastLogSize = -1;
   const pumpLog = (final) => {
+    if (!final) {
+      try {
+        const size = fs.statSync(logFile).size;
+        if (size === lastLogSize) return '';
+        lastLogSize = size;
+      } catch { return ''; }
+    }
     let txt = '';
     try { txt = fs.readFileSync(logFile, 'utf8'); } catch { return ''; }
     const lines = txt.split(/\r?\n/);
@@ -130,19 +138,25 @@ async function runUV4(cfg, projectDir, op /* 'build' | 'flash' */) {
     // 轮询日志的最终 “N Error(s)” 标记；确认完成后只结束本次无窗口 UV4 进程。
     const psCmd = `
       $p = Start-Process -FilePath ${psq(uv4)} -ArgumentList @(${args.map(psArg).join(', ')}) -WorkingDirectory ${psq(path.dirname(proj))} -WindowStyle Hidden -PassThru
+      try { $p.PriorityClass = [Diagnostics.ProcessPriorityClass]::BelowNormal } catch {}
       $deadline = [DateTime]::UtcNow.AddMinutes(10)
+      $lastLogLength = -1
       while (-not $p.HasExited -and [DateTime]::UtcNow -lt $deadline) {
         if (Test-Path -LiteralPath ${psq(logFile)}) {
           try {
-            $txt = [IO.File]::ReadAllText(${psq(logFile)})
-            if ($txt -match '(?im)^.*?\\d+\\s+Error\\(s\\).*?$') {
-              try { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } catch {}
-              if ($txt -match '(?im)^.*?0\\s+Error\\(s\\).*?$') { exit 0 }
-              exit 2
+            $logLength = (Get-Item -LiteralPath ${psq(logFile)}).Length
+            if ($logLength -ne $lastLogLength) {
+              $lastLogLength = $logLength
+              $txt = [IO.File]::ReadAllText(${psq(logFile)})
+              if ($txt -match '(?im)^.*?\\d+\\s+Error\\(s\\).*?$') {
+                try { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } catch {}
+                if ($txt -match '(?im)^.*?0\\s+Error\\(s\\).*?$') { exit 0 }
+                exit 2
+              }
             }
           } catch {}
         }
-        Start-Sleep -Milliseconds 200
+        Start-Sleep -Milliseconds 500
         try { $p.Refresh() } catch {}
       }
       if (-not $p.HasExited) {

@@ -12,10 +12,14 @@ const SERIAL_HISTORY_TRIM_CHARS = 3 * 1024 * 1024;
 const SERIAL_MAX_HISTORY_LINES = 3000;
 const SERIAL_HISTORY_TRIM_LINES = 2200;
 
-const QUICK_COMMAND_JSON_EXAMPLE = `[
-  {
-    "name": "基础指令",
-    "cmds": [
+const QUICK_COMMAND_JSON_EXAMPLE = `{
+  "schema": "mcu-toolbox.serial-commands",
+  "version": 1,
+  "mode": "append",
+  "groups": [
+    {
+      "name": "基础指令",
+      "cmds": [
       {
         "enabled": true,
         "name": "查询版本",
@@ -32,11 +36,16 @@ const QUICK_COMMAND_JSON_EXAMPLE = `[
         "interval": 2,
         "unit": "s"
       }
-    ]
-  }
-]`;
+      ]
+    }
+  ]
+}`;
 
 const QUICK_COMMAND_FORMAT_FIELDS = [
+  { scope: '文件', name: 'schema', type: 'string', required: '是', note: '固定为 mcu-toolbox.serial-commands' },
+  { scope: '文件', name: 'version', type: 'number', required: '是', note: '当前版本为 1' },
+  { scope: '文件', name: 'mode', type: 'string', required: '否', note: '固定为 append；导入始终保留本地数据' },
+  { scope: '文件', name: 'groups', type: 'array', required: '是', note: '需要追加的分组数组' },
   { scope: '分组', name: 'name', type: 'string', required: '是', note: '分组显示名称' },
   { scope: '分组', name: 'cmds', type: 'array', required: '是', note: '快捷指令数组' },
   { scope: '指令', name: 'name', type: 'string', required: '是', note: '指令名称或备注' },
@@ -51,13 +60,14 @@ const QUICK_COMMAND_AI_PROMPT = `请为“MCU 工具箱”的串口快捷指令�
 只输出合法 JSON，不要使用 Markdown 代码块，不要添加解释文字。
 
 格式要求：
-1. 顶层必须是分组数组。
-2. 每个分组包含 name 和 cmds。
-3. 每条指令包含 name、content，可选 enabled、hex、interval、unit。
-4. hex=false 时 content 填文本；程序发送时会自动追加 CRLF。
-5. hex=true 时 content 只填写十六进制字节，例如 "AA 55 01 00 FE"。
-6. unit 只能是 "ms"、"s" 或 "min"。
-7. 不要生成 id 字段。
+1. 顶层必须包含 schema、version、mode 和 groups。
+2. schema 固定为 "mcu-toolbox.serial-commands"，version 固定为 1，mode 固定为 "append"。
+3. groups 是分组数组，每个分组包含 name 和 cmds。
+4. 每条指令包含 name、content，可选 enabled、hex、interval、unit。
+5. hex=false 时 content 填文本；程序发送时会自动追加 CRLF。
+6. hex=true 时 content 只填写十六进制字节，例如 "AA 55 01 00 FE"。
+7. unit 只能是 "ms"、"s" 或 "min"。
+8. 不要生成 id 字段；导入只追加，不覆盖已有分组。
 
 参考结构：
 ${QUICK_COMMAND_JSON_EXAMPLE}
@@ -223,7 +233,8 @@ export function useSerial() {
   }
   function persistQuickCmds() { clearTimeout(qcSaveT); qcSaveT = setTimeout(saveQuickCmdsNow, 400); }
   async function exportQuickCmds() {
-    try { const r = await window.api.exportQuickCmds(plainGroups()); if (r && r.ok) ElMessage.success('已导出: ' + r.path); else if (r && r.error) ElMessage.error('导出失败: ' + r.error); }
+    const payload = { schema: 'mcu-toolbox.serial-commands', version: 1, mode: 'append', groups: plainGroups() };
+    try { const r = await window.api.exportQuickCmds(payload); if (r && r.ok) ElMessage.success('已导出: ' + r.path); else if (r && r.error) ElMessage.error('导出失败: ' + r.error); }
     catch (_e) { ElMessage.error('导出失败'); }
   }
   async function importQuickCmds() {
@@ -232,15 +243,29 @@ export function useSerial() {
       if (!r || !r.ok) { if (r && r.error) ElMessage.error('导入失败: ' + r.error); return; }
       const d = r.data;
       let groups = null;
-      if (Array.isArray(d) && d.length && d[0] && Array.isArray(d[0].cmds)) groups = d;           // 分组数组
+      if (d && d.schema === 'mcu-toolbox.serial-commands' && d.version === 1 && Array.isArray(d.groups)) groups = d.groups;
+      else if (Array.isArray(d) && d.length && d[0] && Array.isArray(d[0].cmds)) groups = d;      // 旧版分组数组
       else if (d && Array.isArray(d.serialCmdGroups)) groups = d.serialCmdGroups;                  // {serialCmdGroups:[...]}
       else if (Array.isArray(d)) groups = [{ name: '导入', cmds: d }];                             // 旧版扁平指令数组
       else if (d && Array.isArray(d.serialQuickCmds)) groups = [{ name: '导入', cmds: d.serialQuickCmds }];
       if (!groups) { ElMessage.error('文件格式不对，请按 JSON 格式说明生成'); openQuickFormat(); return; }
-      cmdGroups.value = groups.map(normGroup);
-      if (!cmdGroups.value.length) cmdGroups.value = [normGroup({ name: '默认', cmds: [] })];
-      activeGid.value = cmdGroups.value[0].id;
-      ElMessage.success('已导入 ' + cmdGroups.value.length + ' 个分组');
+      const imported = groups.map(normGroup);
+      const usedNames = new Set(cmdGroups.value.map((g) => g.name));
+      for (const group of imported) {
+        const originalName = group.name;
+        if (usedNames.has(group.name)) {
+          let suffix = 1;
+          do {
+            group.name = `${originalName} (导入${suffix > 1 ? ` ${suffix}` : ''})`;
+            suffix += 1;
+          } while (usedNames.has(group.name));
+        }
+        usedNames.add(group.name);
+      }
+      cmdGroups.value.push(...imported);
+      if (imported.length) activeGid.value = imported[0].id;
+      await window.api.saveConfig({ serialCmdGroups: plainGroups() });
+      ElMessage.success('已追加导入 ' + imported.length + ' 个分组，原有指令已保留');
     } catch (_e) { ElMessage.error('导入失败'); }
   }
 

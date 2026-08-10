@@ -18,7 +18,11 @@ test('quick command toolbar exposes JSON format documentation', () => {
 test('recommended quick command example is valid importable JSON', () => {
   const match = composable.match(/const QUICK_COMMAND_JSON_EXAMPLE = `([\s\S]*?)`;/);
   assert.ok(match, 'missing QUICK_COMMAND_JSON_EXAMPLE');
-  const groups = JSON.parse(match[1]);
+  const payload = JSON.parse(match[1]);
+  assert.equal(payload.schema, 'mcu-toolbox.serial-commands');
+  assert.equal(payload.version, 1);
+  assert.equal(payload.mode, 'append');
+  const groups = payload.groups;
   assert.ok(Array.isArray(groups) && groups.length > 0);
   assert.equal(typeof groups[0].name, 'string');
   assert.ok(Array.isArray(groups[0].cmds) && groups[0].cmds.length > 0);
@@ -30,9 +34,10 @@ test('recommended quick command example is valid importable JSON', () => {
 });
 
 test('AI prompt documents every supported import field', () => {
-  for (const field of ['name', 'cmds', 'content', 'enabled', 'hex', 'interval', 'unit']) {
+  for (const field of ['schema', 'version', 'mode', 'groups', 'name', 'cmds', 'content', 'enabled', 'hex', 'interval', 'unit']) {
     assert.match(composable, new RegExp(`name: '${field}'|${field}`));
   }
   assert.match(composable, /不要生成 id 字段/);
   assert.match(composable, /只输出合法 JSON/);
+  assert.match(composable, /导入只追加，不覆盖已有分组/);
 });

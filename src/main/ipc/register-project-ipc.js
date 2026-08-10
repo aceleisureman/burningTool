@@ -12,7 +12,8 @@ const MAX_QUICKCMD_TEXT_CHARS = 64 * 1024;
 
 function validateQuickCmdData(data) {
   let groups = null;
-  if (Array.isArray(data) && data.some((item) => item && Array.isArray(item.cmds))) groups = data;
+  if (data && data.schema === 'mcu-toolbox.serial-commands' && data.version === 1 && Array.isArray(data.groups)) groups = data.groups;
+  else if (Array.isArray(data) && data.some((item) => item && Array.isArray(item.cmds))) groups = data;
   else if (data && Array.isArray(data.serialCmdGroups)) groups = data.serialCmdGroups;
   else if (Array.isArray(data)) groups = [{ cmds: data }];
   else if (data && Array.isArray(data.serialQuickCmds)) groups = [{ cmds: data.serialQuickCmds }];
