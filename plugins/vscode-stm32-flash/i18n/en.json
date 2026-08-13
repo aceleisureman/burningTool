@@ -86,6 +86,8 @@
   "esp32.pio_ext_not_found": "PlatformIO IDE extension (platformio.ide) not found — please install it",
   "esp32.install_pio_ext": "Install PlatformIO IDE extension",
   "esp32.pio_ext_installing": "Installing PlatformIO IDE…",
+  "esp32.install_pio_cli": "Install PlatformIO CLI",
+  "esp32.pio_cli_installing": "Installing PlatformIO CLI…",
   "esp32.pio_need_reload": "PlatformIO IDE installed — please reload VS Code to activate the extension",
   "esp32.pio_restart_hint": "After reload you can build/flash via PlatformIO IDE",
   "esp32.framework.label": "Framework",

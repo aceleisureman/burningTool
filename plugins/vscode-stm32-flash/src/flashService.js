@@ -3,6 +3,7 @@
 const vscode = require('vscode');
 const { EventEmitter } = require('events');
 const { jobLock, checkProbeInfo, readChipInfo } = require('../vendor/flash-core');
+const { installPlatformioCli } = require('./platforms/esp32');
 const {
   listRecentProjectInfos,
   addRecentProject,
@@ -84,7 +85,7 @@ function createFlashService(deps) {
         const cfg = getConfig();
         const dir = getProjectDir();
         const platform = getPlatform(cfg.projectMode || 'stm32cube');
-        const readiness = await platform.checkReadiness(cfg, dir);
+        const readiness = await platform.checkReadiness(cfg, dir, output);
         if (generation === readinessGeneration) {
           state.readiness = readiness;
           state.checking = false;
@@ -392,6 +393,30 @@ function createFlashService(deps) {
     return r;
   }
 
+  async function doInstallPlatformioCli() {
+    const cfg = getConfig();
+    const ctx = { output, cfg };
+    state.busy = true;
+    state.job = 'install-platformio-cli';
+    emitState();
+    try {
+      const result = await installPlatformioCli(ctx);
+      output.append(
+        result.ok ? '[PlatformIO] ✓ CLI 安装完成' : `[PlatformIO] ✗ CLI 安装失败: ${result.error || ''}`,
+        result.ok ? 'success' : 'error'
+      );
+      return result;
+    } catch (e) {
+      const msg = e && e.message ? e.message : String(e);
+      output.append(`[PlatformIO] ✗ CLI 安装异常: ${msg}`, 'error');
+      return { ok: false, error: msg };
+    } finally {
+      state.busy = false;
+      state.job = '';
+      await refreshState();
+    }
+  }
+
   return {
     on: (ev, fn) => emitter.on(ev, fn),
     off: (ev, fn) => emitter.off(ev, fn),
@@ -406,6 +431,7 @@ function createFlashService(deps) {
     doGenerateMakefile,
     doCheckProbe,
     doReadChipInfo,
+    installPlatformioCli: doInstallPlatformioCli,
     cancel
   };
 }

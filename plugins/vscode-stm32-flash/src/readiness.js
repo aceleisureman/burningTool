@@ -4,7 +4,7 @@ const { getPlatform } = require('./platforms/index');
 
 // 保留这些 export 供现有测试兼容
 const { resolveMake, resolveArmGcc } = require('./platforms/stm32cube');
-const { resolvePio } = require('./platforms/esp32');
+const { resolvePio, installPlatformioCli, checkPython } = require('./platforms/esp32');
 
 /**
  * 检查当前平台编译器 + 烧录设备是否就绪。
@@ -18,4 +18,4 @@ async function checkReadiness(cfg, projectDir) {
   return platform.checkReadiness(c, projectDir);
 }
 
-module.exports = { checkReadiness, resolveMake, resolveArmGcc, resolvePio };
+module.exports = { checkReadiness, resolveMake, resolveArmGcc, resolvePio, installPlatformioCli, checkPython };

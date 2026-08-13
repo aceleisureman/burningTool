@@ -86,6 +86,8 @@
   "esp32.pio_ext_not_found": "未检测到 PlatformIO IDE 扩展（platformio.ide），请先安装",
   "esp32.install_pio_ext": "安装 PlatformIO IDE 扩展",
   "esp32.pio_ext_installing": "正在安装 PlatformIO IDE…",
+  "esp32.install_pio_cli": "安装 PlatformIO CLI",
+  "esp32.pio_cli_installing": "正在安装 PlatformIO CLI…",
   "esp32.pio_need_reload": "PlatformIO IDE 已安装，请重启 VS Code 以激活扩展",
   "esp32.pio_restart_hint": "重启后即可通过 PlatformIO IDE 编译烧录",
   "esp32.framework.label": "Framework",

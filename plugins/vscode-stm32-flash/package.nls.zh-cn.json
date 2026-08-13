@@ -37,5 +37,6 @@
   "cfg.esp32SubMode.desc": "ESP32 子模式：platformio（PlatformIO CLI）、arduino（Arduino CLI）、idf（ESP-IDF）、micropython（MicroPython）",
   "cfg.serialPort.desc": "ESP32 烧录使用的串口，留空时由烧录工具自动检测。",
   "cfg.hidePlatformIOToolbar.desc": "隐藏 PlatformIO 工具栏快捷方式，改用 MCU-Assistant 的精简状态栏操作。",
-  "cfg.autoDownloadDependencies.desc": "检测到 STM32Cube 默认工具链缺失时自动下载 GCC、make、pyOCD 和 OpenOCD。"
+  "cfg.autoDownloadDependencies.desc": "检测到 STM32Cube 默认工具链缺失时自动下载 GCC、make、pyOCD 和 OpenOCD。",
+  "cfg.platformioCoreDir.desc": "自定义 PlatformIO Core 目录（如 D:/tools/platformio）。设置后从此目录下的 penv/ 查找 pio 可执行文件。留空时检查 PLATFORMIO_CORE_DIR 环境变量。两者均未设置时使用默认路径 ~/.platformio/penv/，或自动下载安装 CLI。"
 }

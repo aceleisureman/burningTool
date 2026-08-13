@@ -12,8 +12,9 @@ class Stm32FlashViewProvider {
    * @param {vscode.Uri} extensionUri
    * @param {*} service
    * @param {string} version
+   * @param {vscode.ExtensionContext} [context]
    */
-  constructor(extensionUri, service, version) {
+  constructor(extensionUri, service, version, context) {
     this._extensionUri = extensionUri;
     this._service = service;
     this._version = version || '0.0.0';
@@ -23,7 +24,7 @@ class Stm32FlashViewProvider {
     this._forceRefreshPending = false;
     this._lastStateJson = '';
     this._onState = () => this.refresh();
-    this._routeMessage = createMessageRouter(service, (force) => this.refresh(force));
+    this._routeMessage = createMessageRouter(service, (force) => this.refresh(force), context);
     service.on('state', this._onState);
   }
 
@@ -854,6 +855,8 @@ class Stm32FlashViewProvider {
         'esp32.pio_not_found': '未找到 pio 命令，请安装 PlatformIO CLI 或 PlatformIO IDE',
         'esp32.install_pio_ext': '安装 PlatformIO IDE 扩展',
         'esp32.pio_ext_installing': '正在安装 PlatformIO IDE…',
+        'esp32.install_pio_cli': '安装 PlatformIO CLI',
+        'esp32.pio_cli_installing': '正在安装 PlatformIO CLI…',
         'esp32.framework.label': 'Framework',
         'esp32.framework.platformio': 'PlatformIO',
         'esp32.framework.arduino': 'Arduino',
@@ -939,6 +942,8 @@ class Stm32FlashViewProvider {
         'esp32.pio_not_found': 'pio command not found — install PlatformIO CLI or PlatformIO IDE',
         'esp32.install_pio_ext': 'Install PlatformIO IDE extension',
         'esp32.pio_ext_installing': 'Installing PlatformIO IDE…',
+        'esp32.install_pio_cli': 'Install PlatformIO CLI',
+        'esp32.pio_cli_installing': 'Installing PlatformIO CLI…',
         'esp32.framework.label': 'Framework',
         'esp32.framework.platformio': 'PlatformIO',
         'esp32.framework.arduino': 'Arduino',
@@ -998,6 +1003,7 @@ class Stm32FlashViewProvider {
 
     let _pioInstallTriggered = false;
     function installPio() { post('installPlatformIO'); _pioInstallTriggered = true; }
+    function installPioCli() { post('installPlatformioCli'); }
 
     const ICONS = {
       folder: '<svg viewBox="0 0 24 24" fill="none"><path d="M3.5 7.5h6l1.5 2H20.5v9.5a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 19V7.5z" stroke="currentColor" stroke-width="1.5"/><path d="M3.5 10.5h17" stroke="currentColor" stroke-width="1.5"/></svg>',
@@ -1401,16 +1407,31 @@ class Stm32FlashViewProvider {
             hint.className = 'hint err';
             hint.innerHTML =
               escapeHtml((readiness.compiler && readiness.compiler.detail) || t('esp32.pio_not_found')) +
-              ' <button id="btnInstallPio" style="' +
-              'margin-left:6px;padding:2px 8px;font-size:10.5px;' +
+              '<br><button id="btnInstallPioCli" style="' +
+              'margin-top:4px;padding:2px 8px;font-size:10.5px;' +
               'border-radius:3px;border:1px solid var(--btn-bg);' +
               'background:var(--btn-bg);color:var(--btn-fg);cursor:pointer">' +
+              escapeHtml(t('esp32.install_pio_cli')) + '</button>' +
+              ' <button id="btnInstallPio" style="' +
+              'margin-top:4px;padding:2px 8px;font-size:10.5px;' +
+              'border-radius:3px;border:1px solid transparent;' +
+              'background:var(--btn2-bg);color:var(--btn2-fg);cursor:pointer">' +
               escapeHtml(t('esp32.install_pio_ext')) + '</button>';
             const installButton = $('btnInstallPio');
             if (installButton) installButton.onclick = installPio;
+            const installCliButton = $('btnInstallPioCli');
+            if (installCliButton) installCliButton.onclick = installPioCli;
           } else {
             hint.className = 'hint err';
-            hint.innerHTML = escapeHtml((readiness.compiler && readiness.compiler.detail) || t('esp32.pio_not_found'));
+            hint.innerHTML =
+              escapeHtml((readiness.compiler && readiness.compiler.detail) || t('esp32.pio_not_found')) +
+              '<br><button id="btnInstallPioCli" style="' +
+              'margin-top:4px;padding:2px 8px;font-size:10.5px;' +
+              'border-radius:3px;border:1px solid var(--btn-bg);' +
+              'background:var(--btn-bg);color:var(--btn-fg);cursor:pointer">' +
+              escapeHtml(t('esp32.install_pio_cli')) + '</button>';
+            const installCliButton = $('btnInstallPioCli');
+            if (installCliButton) installCliButton.onclick = installPioCli;
           }
         } else if (readiness && !readiness.readyForFlash) {
           hint.className = 'hint err';

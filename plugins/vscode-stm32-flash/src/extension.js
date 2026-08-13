@@ -1,6 +1,8 @@
 'use strict';
 
+const fs = require('fs');
 const os = require('os');
+const path = require('path');
 const vscode = require('vscode');
 const {
   setPathsContext,
@@ -58,6 +60,9 @@ function activate(context) {
   const roots0 = applySharedPaths();
   setConfigLoader(() => loadFlashConfig());
 
+  // 静默压制 VS Code 内置的 PlatformIO IDE 推荐弹窗
+  suppressPioRecommendation();
+
   const output = createOutput();
   const statusBar = createStatusBar();
   const dependencyInstaller = createDependencyInstaller(loadFlashConfig, output);
@@ -86,7 +91,7 @@ function activate(context) {
     openProjectInVscode
   });
 
-  const provider = new Stm32FlashViewProvider(context.extensionUri, service, extVersion);
+  const provider = new Stm32FlashViewProvider(context.extensionUri, service, extVersion, context);
   context.subscriptions.push(
     provider,
     vscode.window.registerWebviewViewProvider(Stm32FlashViewProvider.viewType, provider, {
@@ -154,6 +159,33 @@ function activate(context) {
   output.append(t('sys.toolchain', roots0.toolchainRoot) + (roots0.hasToolchain ? '' : t('sys.toolchain_not_installed')), 'info');
   output.append(t('sys.userdata', roots0.userDataDir), 'info');
   output.append(`[System] ${platformHint()}`, 'info');
+}
+
+/**
+ * 检测 PlatformIO IDE 已安装时，将其加入 workspace 的 unwantedRecommendations，
+ * 压制 VS Code 内置的"推荐安装"弹窗。
+ */
+function suppressPioRecommendation() {
+  if (!vscode.extensions.getExtension('platformio.platformio-ide')) return;
+  const folders = vscode.workspace.workspaceFolders || [];
+  if (!folders.length) return;
+  const wsRoot = folders[0].uri.fsPath;
+  if (!wsRoot) return;
+  const extJsonPath = path.join(wsRoot, '.vscode', 'extensions.json');
+  try {
+    let extJson = { recommendations: [], unwantedRecommendations: [] };
+    if (fs.existsSync(extJsonPath)) {
+      const raw = fs.readFileSync(extJsonPath, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') extJson = parsed;
+    }
+    const unwanted = extJson.unwantedRecommendations || [];
+    if (unwanted.includes('platformio.platformio-ide')) return; // 已存在无需重复添加
+    unwanted.push('platformio.platformio-ide');
+    extJson.unwantedRecommendations = unwanted;
+    fs.mkdirSync(path.dirname(extJsonPath), { recursive: true });
+    fs.writeFileSync(extJsonPath, JSON.stringify(extJson, null, 2), 'utf8');
+  } catch { /* 静默失败，不影响插件主流程 */ }
 }
 
 function deactivate() {
