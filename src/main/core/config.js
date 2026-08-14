@@ -6,6 +6,7 @@ const {
   applyPlatformPaths,
   mergeCurrentPlatformPaths
 } = require('../toolchain/platform-toolchains');
+const { applyPlatformState, mergeCurrentPlatformState } = require('./platform-state');
 
 const KEIL_SUPPORTED = process.platform === 'win32';
 const PLATFORM_TC = getPlatformToolchainProfile(process.platform, process.arch);
@@ -151,7 +152,7 @@ function normalizeConfig(cfg) {
   const source = Object.assign({}, cfg, {
     httpApi: Object.assign({}, DEFAULT_CONFIG.httpApi, (cfg && cfg.httpApi) || {})
   });
-  const next = applyPlatformPaths(source, PLATFORM_TC.id, DEFAULT_CONFIG);
+  const next = applyPlatformState(applyPlatformPaths(source, PLATFORM_TC.id, DEFAULT_CONFIG), PLATFORM_TC.id);
   next.updateFeedUrl = typeof next.updateFeedUrl === 'string' ? next.updateFeedUrl.trim() : '';
   if (!KEIL_SUPPORTED) {
     if (next.buildSystem === 'keil') next.buildSystem = 'make';
@@ -208,7 +209,10 @@ function flushSaveConfig() {
 // opts.immediate === true 时同步写盘（重置配置等关键路径）。
 function saveConfig(cfg, opts) {
   const base = Object.assign({}, DEFAULT_CONFIG, loadConfig());
-  const merged = normalizeConfig(mergeCurrentPlatformPaths(base, cfg, PLATFORM_TC.id, DEFAULT_CONFIG));
+  let merged = mergeCurrentPlatformPaths(base, cfg, PLATFORM_TC.id, DEFAULT_CONFIG);
+  // 保留其他平台的 platformState 快照，再把本平台最新值写入快照，防止旧快照覆盖新值
+  merged.platformState = Object.assign({}, base.platformState, (cfg && cfg.platformState) || {});
+  merged = normalizeConfig(mergeCurrentPlatformState(merged, PLATFORM_TC.id));
   _configCache = merged;
   if (opts && opts.immediate) {
     if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }

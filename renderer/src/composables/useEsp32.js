@@ -225,16 +225,29 @@ export function useEsp32(deps = {}) {
     return true;
   }
 
+  // 方案(preset)全平台共享，但 .bin 绝对路径是机器相关的：
+  // 套用时清掉明显属于另一平台的路径，保留偏移/名称，提示重新选文件
+  const IS_WIN = /win/i.test(navigator.platform || '');
+  function looksLikeOtherPlatformPath(p) {
+    if (typeof p !== 'string' || !p) return false;
+    return IS_WIN ? p.startsWith('/') : /^[a-z]:[\\/]/i.test(p);
+  }
+
   function applyEspPreset(id) {
     const preset = esp32.presets.find((p) => p.id === id);
     if (!preset) { ElMessage.warning('方案不存在'); return; }
     esp32.partMode = true;
     esp32.activePresetId = preset.id;
     esp32.presetName = preset.name;
-    esp32.parts = (preset.parts || []).map(makePart);
+    let cleared = 0;
+    esp32.parts = (preset.parts || []).map(makePart).map((p) => {
+      if (looksLikeOtherPlatformPath(p.path)) { cleared += 1; return { ...p, path: '', size: 0 }; }
+      return p;
+    });
     if (preset.chip && preset.chip !== 'auto') esp32.chip = preset.chip;
     persistEsp32Config();
-    ElMessage.success('已加载方案: ' + preset.name);
+    if (cleared) ElMessage.warning(`已加载方案: ${preset.name}，其中 ${cleared} 个分区的固件路径来自其他系统，请重新选择 .bin`);
+    else ElMessage.success('已加载方案: ' + preset.name);
   }
 
   function deleteEspPreset(id) {

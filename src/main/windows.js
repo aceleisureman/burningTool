@@ -210,9 +210,26 @@ function setupSerial(win) {
   });
 }
 
+// 记忆的窗口位置可能来自已拔掉的外接屏或分辨率不同的机器：
+// 不在任何现有显示器工作区内时丢弃坐标（保留尺寸），交给系统默认摆放
+function sanitizeWindowBounds(bounds) {
+  const b = bounds || {};
+  if (!Number.isInteger(b.x) || !Number.isInteger(b.y)) return b;
+  try {
+    const { screen } = require('electron');
+    const visible = screen.getAllDisplays().some((d) => {
+      const a = d.workArea;
+      return b.x < a.x + a.width && b.x + (b.width || 0) > a.x
+        && b.y < a.y + a.height && b.y + (b.height || 0) > a.y;
+    });
+    if (!visible) return { width: b.width, height: b.height };
+  } catch {}
+  return b;
+}
+
 function createWindow() {
   const cfg = loadConfig();
-  const b = cfg.windowBounds || {};
+  const b = sanitizeWindowBounds(cfg.windowBounds);
   mainWindow = new BrowserWindow({
     width: b.width || 1140,
     height: b.height || 760,

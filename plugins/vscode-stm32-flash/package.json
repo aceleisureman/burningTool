@@ -2,7 +2,7 @@
   "name": "mcu-assistant",
   "displayName": "%ext.displayName%",
   "description": "%ext.description%",
-  "version": "0.1.49",
+  "version": "0.1.52",
   "publisher": "leisureman",
   "engines": {
     "vscode": "^1.85.0"
@@ -140,6 +140,7 @@
         "stm32Flash.projectDir": {
           "type": "string",
           "default": "",
+          "scope": "machine",
           "description": "%cfg.projectDir.desc%"
         },
         "stm32Flash.targetChip": {
@@ -185,11 +186,13 @@
         "stm32Flash.pyocdPath": {
           "type": "string",
           "default": "",
+          "scope": "machine",
           "description": "%cfg.pyocdPath.desc%"
         },
         "stm32Flash.openocdPath": {
           "type": "string",
           "default": "",
+          "scope": "machine",
           "description": "%cfg.openocdPath.desc%"
         },
         "stm32Flash.openocdInterface": {
@@ -200,16 +203,19 @@
         "stm32Flash.armGccPath": {
           "type": "string",
           "default": "",
+          "scope": "machine",
           "description": "%cfg.armGccPath.desc%"
         },
         "stm32Flash.makePath": {
           "type": "string",
           "default": "",
+          "scope": "machine",
           "description": "%cfg.makePath.desc%"
         },
         "stm32Flash.keilUV4Path": {
           "type": "string",
           "default": "C:\\\\Keil_v5\\\\UV4\\\\UV4.exe",
+          "scope": "machine",
           "description": "%cfg.keilUV4Path.desc%"
         },
         "stm32Flash.keilRebuild": {
@@ -220,11 +226,13 @@
         "stm32Flash.cubeMxPath": {
           "type": "string",
           "default": "",
+          "scope": "machine",
           "description": "%cfg.cubeMxPath.desc%"
         },
         "stm32Flash.toolchainRootPath": {
           "type": "string",
           "default": "",
+          "scope": "machine",
           "description": "%cfg.toolchainRootPath.desc%"
         },
         "stm32Flash.ghProxy": {
@@ -265,6 +273,7 @@
         "stm32Flash.serialPort": {
           "type": "string",
           "default": "",
+          "scope": "machine",
           "description": "%cfg.serialPort.desc%"
         },
         "stm32Flash.hidePlatformIOToolbar": {
