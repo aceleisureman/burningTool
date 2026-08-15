@@ -37,5 +37,6 @@
   "cfg.esp32SubMode.desc": "ESP32 sub-mode: platformio (PlatformIO CLI), arduino (Arduino CLI), idf (ESP-IDF), micropython (MicroPython)",
   "cfg.serialPort.desc": "Serial port used for ESP32 flashing. Leave blank to auto-detect.",
   "cfg.hidePlatformIOToolbar.desc": "Hide PlatformIO toolbar shortcuts and use the compact MCU-Assistant status bar actions instead.",
-  "cfg.autoDownloadDependencies.desc": "Automatically download GCC, make, pyOCD, and OpenOCD when the STM32Cube default toolchain is missing."
+  "cfg.autoDownloadDependencies.desc": "Automatically download GCC, make, pyOCD, and OpenOCD when the STM32Cube default toolchain is missing.",
+  "cfg.platformioCoreDir.desc": "Custom PlatformIO Core directory (e.g. D:/tools/platformio). When set, the pio executable is resolved from <dir>/penv/. Leave empty to check the PLATFORMIO_CORE_DIR environment variable. If both are empty, the default path ~/.platformio/penv/ is used, or the CLI is downloaded automatically."
 }

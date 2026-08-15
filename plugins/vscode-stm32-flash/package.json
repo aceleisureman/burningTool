@@ -2,7 +2,7 @@
   "name": "mcu-assistant",
   "displayName": "%ext.displayName%",
   "description": "%ext.description%",
-  "version": "0.1.52",
+  "version": "0.1.56",
   "publisher": "leisureman",
   "engines": {
     "vscode": "^1.85.0"
@@ -285,6 +285,11 @@
           "type": "boolean",
           "default": false,
           "description": "%cfg.autoDownloadDependencies.desc%"
+        },
+        "stm32Flash.platformioCoreDir": {
+          "type": "string",
+          "default": "",
+          "description": "%cfg.platformioCoreDir.desc%"
         }
       }
     }

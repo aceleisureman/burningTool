@@ -61,6 +61,7 @@ function loadFlashConfig() {
     serialPort: stringSetting('serialPort', ''),
     hidePlatformIOToolbar: boolSetting('hidePlatformIOToolbar', true),
     autoDownloadDependencies: boolSetting('autoDownloadDependencies', false),
+    platformioCoreDir: stringSetting('platformioCoreDir', ''),
     platformPaths: {},
     // 扩展侧元信息（core 忽略多余字段）
     _runtime: {
@@ -91,9 +92,13 @@ async function setProjectDir(dir, global = true) {
 /**
  * @param {string} key
  * @param {any} value
+ * @param {boolean} [workspaceScoped] true=写入工作区设置，false=写入全局设置
  */
-async function updateSetting(key, value) {
-  await getSection().update(key, value, vscode.ConfigurationTarget.Global);
+async function updateSetting(key, value, workspaceScoped = false) {
+  const target = workspaceScoped
+    ? vscode.ConfigurationTarget.Workspace
+    : vscode.ConfigurationTarget.Global;
+  await getSection().update(key, value, target);
 }
 
 function onConfigChange(cb) {
