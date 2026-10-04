@@ -123,7 +123,6 @@ export default defineConfig(({ command }) => ({
         // 由 Rollup 自动 tree-shake + 分片，强行归并反而失去按需拆分的收益。
         manualChunks(id) {
           if (!id.includes('node_modules')) return undefined;
-          if (id.includes('@element-plus/icons-vue')) return 'el-icons';
           if (id.includes('/vue/') || id.includes('@vue/') || id.includes('vue-demi')) return 'vue-vendor';
           return undefined;
         },
