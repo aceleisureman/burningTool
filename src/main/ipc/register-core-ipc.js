@@ -9,10 +9,14 @@ const { readHostSystemInfo } = require('../toolchain/toolchain');
 const httpApi = require('../core/http-server');
 const updater = require('../core/updater');
 const { loadMqttHistory, saveMqttHistory } = require('../core/mqtt-history-store');
+const profile = require('../core/startup-profile');
+const memoryMonitor = require('../core/memory-monitor');
 
 function registerCoreIpc({ send }) {
   const MAX_CONFIG_BYTES = 8 * 1024 * 1024;
   const MAX_CLIPBOARD_CHARS = 4 * 1024 * 1024;
+  // 手动检查更新的在途标记：避免连点造成多路并发检查/下载
+  let updateCheckInFlight = false;
   async function startHttpApiFromConfig() {
     const cfg = loadConfig();
     const api = cfg.httpApi || {};
@@ -44,7 +48,19 @@ function registerCoreIpc({ send }) {
     return { ok: true };
   });
 
-  ipcMain.handle('update-check', () => updater.checkNow());
+  // 检查更新：立即返回已受理的 ack，实际检查/下载在后台进行，
+  // 结果通过 'update-status' 推送（渲染端另有轮询兜底）。
+  // 这样即便下载大安装包，也不会让主进程一直挂着一个待完成的 IPC 调用，
+  // 更不会阻塞主程序其它 IPC。
+  ipcMain.handle('update-check', () => {
+    if (updateCheckInFlight) return { ok: true, note: 'already-checking', state: updater.getState() };
+    updateCheckInFlight = true;
+    Promise.resolve()
+      .then(() => updater.checkNow())
+      .catch(() => {})
+      .finally(() => { updateCheckInFlight = false; });
+    return { ok: true, note: 'started', state: updater.getState() };
+  });
   ipcMain.handle('update-status', () => updater.getState());
   ipcMain.handle('update-install', () => updater.quitAndInstall());
 
@@ -68,6 +84,22 @@ function registerCoreIpc({ send }) {
   });
   ipcMain.handle('get-platform', () => process.platform);
   ipcMain.handle('get-platform-toolchain', () => Object.assign({}, PLATFORM_TC, { systemInfo: readHostSystemInfo() }));
+
+  // 启动性能探针：渲染层在「挂载完成 / 首屏可见」时刻回报里程碑，
+  // 统一并入主进程时间轴；仅在 MCU_STARTUP_PROFILE=1 时有效（否则 no-op）。
+  // 需要时可在主进程日志里看到 renderer:* 阶段。
+  ipcMain.handle('startup-mark', (_e, name, rendererAt) => {
+    profile.rendererMark(String(name || ''), Number(rendererAt));
+    // 渲染层首帧绘制完成 → 打印一次完整启动报告（仅 MCU_STARTUP_PROFILE=1 时有效）
+    if (String(name) === 'firstPaint') profile.printReport('启动性能（主进程 + 渲染层）');
+    return true;
+  });
+  ipcMain.handle('startup-profile', () => profile.snapshot());
+
+  // ── 内存监控（设置页采样用）──
+  // 采集各进程工作集 / 峰值 / 私有字节 + 主进程 JS 堆，供排查内存增长与优化对比。
+  ipcMain.handle('app-memory-stats', () => memoryMonitor.collect());
+  ipcMain.handle('app-memory-gc', () => memoryMonitor.forceGc());
 
   return { startHttpApiFromConfig };
 }

@@ -163,48 +163,28 @@
     </el-dialog>
 
     <!-- ════ 主内容区 ════ -->
+    <!-- 切页性能（实测归因，勿回退成 v-show）：
+         旧写法 10 个页面全部 v-show 常驻 DOM（实测 8703 节点 / app-main 6070 节点），
+         切页只是改 display，但整棵子树仍要重算样式 + 重排 —— 串口页实测
+         样式重算 45.7ms + 布局 39.3ms + 116 次 recalc，固件分析页 25ms + 114 次。
+         改为「只挂载当前页」：DOM 降到约 1/8，切页不再触发跨页样式级联。
+         外层 KeepAlive 缓存组件实例，来回切换不丢状态、不重跑 setup（第一次进入除外）。 -->
     <div class="app-main">
-
-      <!-- ───── 工具①：烧录 ───── -->
-      <!-- flash -->
-      <FlashView v-show="tool === 'flash'" />
-
-      <!-- ───── 工具②：StcGal ───── -->
-      <!-- stc51 -->
-      <Stc51View v-show="tool === 'stc51'" />
-
-      <!-- ───── 工具③：ESP32 烧录 ───── -->
-      <!-- esp32 -->
-      <Esp32View v-show="tool === 'esp32'" />
-
-      <!-- ───── 工具④：硬件调试 ───── -->
-      <!-- hardware -->
-      <HardwareView v-show="tool === 'hardware'" />
-
-      <!-- ───── 工具③：内存日志 ───── -->
-      <!-- ramlog -->
-      <RamLogView v-show="tool === 'ramlog'" />
-
-      <!-- ───── 工具④：固件分析 ───── -->
-      <!-- firmware -->
-      <FirmwareView v-show="tool === 'firmware'" />
-
-      <!-- ───── 工具⑤：串口调试 ───── -->
-      <!-- serial -->
-      <SerialView v-show="tool === 'serial'" />
-
-      <!-- ───── 工具③：MQTT 调试（MQTTX 风格 · 多连接）───── -->
-      <!-- mqtt -->
-      <MqttView v-show="tool === 'mqtt'" />
-
-      <!-- ───── 工具④：字模生成（PCtoLCD 风格 · 重编）───── -->
-      <!-- glyph -->
-      <GlyphView v-show="tool === 'glyph'" />
-      <CrcView v-show="tool === 'crc'" />
-
-      <!-- ───── 工具⑤：设置 ───── -->
-      <!-- settings -->
-      <SettingsView v-show="tool === 'settings'" />
+      <!-- 注意：KeepAlive 内不能再插 HTML 注释 —— 注释会被编译成 comment vnode，
+           触发「KeepAlive expects exactly one child」告警。顺序见下方 v-if 链。 -->
+      <KeepAlive>
+        <FlashView v-if="tool === 'flash'" />
+        <Stc51View v-else-if="tool === 'stc51'" />
+        <Esp32View v-else-if="tool === 'esp32'" />
+        <HardwareView v-else-if="tool === 'hardware'" />
+        <RamLogView v-else-if="tool === 'ramlog'" />
+        <FirmwareView v-else-if="tool === 'firmware'" />
+        <SerialView v-else-if="tool === 'serial'" />
+        <MqttView v-else-if="tool === 'mqtt'" />
+        <GlyphView v-else-if="tool === 'glyph'" />
+        <CrcView v-else-if="tool === 'crc'" />
+        <SettingsView v-else />
+      </KeepAlive>
     </div>
 
     <!-- 串口选择对话框 -->
@@ -276,6 +256,19 @@ import { useHardwareDebug } from './composables/useHardwareDebug.js';
 import { useRamLog } from './composables/useRamLog.js';
 import { useFirmwareAnalysis } from './composables/useFirmwareAnalysis.js';
 import { useUpdate } from './composables/useUpdate.js';
+import { useMemoryMonitor } from './composables/useMemoryMonitor.js';
+
+// 空闲调度：优先 requestIdleCallback（首帧后仍有空闲才跑），降级到双 rAF，
+// 再降级到 setTimeout。用于把非首屏必需的启动任务移出关键路径。
+const idle = (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function')
+  ? (fn) => window.requestIdleCallback(() => fn(), { timeout: 2000 })
+  : (fn) => {
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(() => requestAnimationFrame(() => fn()));
+      } else {
+        setTimeout(fn, 0);
+      }
+    };
 // 工具页面按域拆分，App 仅负责应用外壳与状态装配。
 const FlashView = defineAsyncComponent(() => import('./views/FlashView.vue'));
 const Stc51View = defineAsyncComponent(() => import('./views/Stc51View.vue'));
@@ -316,6 +309,7 @@ export default {
     const ramlog = useRamLog({ settings });
     const firmware = useFirmwareAnalysis({ appendLog: log.appendLog, flash });
     const update = useUpdate();
+    const memory = useMemoryMonitor();
 
     // 叶子组件 inject：把高频状态树提供出去，子组件订阅自身依赖即可，App 主模板不再为每批数据 diff
     provide('log', log);
@@ -325,16 +319,37 @@ export default {
 
     onMounted(() => {
       try { navCollapsed.value = localStorage.getItem('nav-collapsed') === '1'; } catch (_e) {}
-      // loadConfig 读取配置后再分发给串口/ MQTT 域（见 useSettings.loadConfig）
-      settings.loadConfig().then(() => ramlog.applyRamLogConfig(settings.config.ramLogConfig));
-      settings.checkEnv(); flash.loadRecent(); settings.refreshDefaultTc();
-      // 读取真实版本号并同步一次更新状态
-      update.initUpdate().then(() => { if (update.updateState.currentVersion) appVersion.value = update.updateState.currentVersion; });
+      // 启动性能探针：把渲染端的挂载/首屏时刻回报给主进程，统一成一根时间轴。
+      // 未开启 MCU_STARTUP_PROFILE 时主进程侧 no-op，这里几乎无开销。
+      const t0 = performance.now();
+      const reportMark = (name) => {
+        try { window.api.startupMark && window.api.startupMark(name, Math.round(performance.now() - t0)); } catch (_e) {}
+      };
+      reportMark('mounted');
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(() => requestAnimationFrame(() => reportMark('firstPaint')));
+      }
+      // 启动性能：首屏只做「配置读取」这一必需工作，保证尽快可见。
+      // checkEnv / refreshDefaultTc 内部会触发主进程 5 次串行 spawnSync（工具链版本探测），
+      // 单次 timeout 2500ms，跑在启动关键路径上会直接冻结首帧。
+      // 改为「首帧之后、空闲时」执行，并在无配置时跳过一次冗余探测。
+      settings.loadConfig().then(() => {
+        ramlog.applyRamLogConfig(settings.config.ramLogConfig);
+        idle(() => {
+          settings.checkEnv();
+          flash.loadRecent();
+          settings.refreshDefaultTc();
+        });
+      });
+      // 读取真实版本号并同步一次更新状态（同样延后，避免与首帧抢主进程）
+      idle(() => {
+        update.initUpdate().then(() => { if (update.updateState.currentVersion) appVersion.value = update.updateState.currentVersion; });
+      });
     });
 
     const appContext = {
       tool, navCollapsed, toggleNav, aboutVisible, appVersion,
-      ...theme, ...log, ...glyph, ...crcTool, ...settings, ...flash, ...stc51Tool, ...esp32Tool, ...hardware, ...ramlog, ...firmware, ...serial, ...mqtt, ...update,
+      ...theme, ...log, ...glyph, ...crcTool, ...settings, ...flash, ...stc51Tool, ...esp32Tool, ...hardware, ...ramlog, ...firmware, ...serial, ...mqtt, ...update, ...memory,
       FolderOpened, VideoPlay, Upload, CaretRight, Delete, Download, MagicStick, CopyDocument,
       Connection, SwitchButton, Promotion, Plus, Close, RefreshRight, VideoPause, Cpu,
       Operation, Document, DataAnalysis, DataLine

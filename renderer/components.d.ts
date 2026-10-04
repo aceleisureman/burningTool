@@ -40,5 +40,6 @@ declare module 'vue' {
     RamLogText: typeof import('./src/components/RamLogText.vue')['default']
     SerialByteStats: typeof import('./src/components/SerialByteStats.vue')['default']
     SerialTerminal: typeof import('./src/components/SerialTerminal.vue')['default']
+    VirtualList: typeof import('./src/components/VirtualList.vue')['default']
   }
 }

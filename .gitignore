@@ -43,3 +43,11 @@ vite.config.mjs.timestamp-*.mjs
 # VS Code 扩展打包产物与 vendor 拷贝（源在 packages/flash-core）
 *.vsix
 plugins/**/vendor/
+
+# 字体子集化：完整原字体备份与临时字符集（源字体重在仓库外，本地保留用于重新子集化）
+renderer/fonts/*.full.woff2
+renderer/fonts/_subset_chars.txt
+startup-report.json
+
+# AI 助手本地工作记忆（工具状态，非项目源码；与 .vscode/ 同类）
+.workbuddy-ai/

@@ -60,7 +60,20 @@ function collectToolchainPathDirs(status) {
   return uniqueExistingDirs(dirs);
 }
 
+// 读取 Windows 用户 PATH 是 spawnSync('reg') 的同步外部调用（实测 ~90ms），
+// 启动路径上会阻塞 event loop。PATH 极少变化，故缓存 30s；
+// 任何写入操作（add/remove）后调用 invalidateUserPathCache() 立即失效。
+const USER_PATH_TTL_MS = 30 * 1000;
+let userPathCache = null; // { value, at }
+
+function invalidateUserPathCache() {
+  userPathCache = null;
+}
+
 function readWindowsUserPath() {
+  if (userPathCache && (Date.now() - userPathCache.at) < USER_PATH_TTL_MS) {
+    return userPathCache.value;
+  }
   // reg query 比冷启动 PowerShell 更稳；未配置 Path 时按空串处理
   const r = spawnSync('reg', ['query', 'HKCU\\Environment', '/v', 'Path'], {
     encoding: 'utf8',
@@ -70,14 +83,18 @@ function readWindowsUserPath() {
   if (r.error) throw new Error(r.error.message || 'read user PATH failed');
   if (r.status !== 0) {
     const err = String(r.stderr || r.stdout || '');
-    if (/unable to find|找不到|ERROR:\s*The system was unable to find/i.test(err) || r.status === 1) return '';
+    if (/unable to find|找不到|ERROR:\s*The system was unable to find/i.test(err) || r.status === 1) {
+      userPathCache = { value: '', at: Date.now() };
+      return '';
+    }
     throw new Error(err.trim() || 'read user PATH failed');
   }
   const text = String(r.stdout || '');
   // 提示文字可能是本地代码页乱码，但键名和类型仍是 ASCII。
   const m = text.match(/^\s*Path\s+REG_(?:EXPAND_)?SZ\s+(.*?)\s*$/mi);
-  if (m) return m[1].trim();
-  return '';
+  const value = m ? m[1].trim() : '';
+  userPathCache = { value, at: Date.now() };
+  return value;
 }
 
 function writeWindowsUserPath(newPath) {
@@ -101,6 +118,8 @@ function writeWindowsUserPath(newPath) {
   } finally {
     try { fs.unlinkSync(tmp); } catch {}
   }
+  // 写入成功后立刻失效读缓存，保证紧随其后的 getSystemPathStatus() 看到新值
+  invalidateUserPathCache();
   // 不同步启动 PowerShell 广播，避免冷启动阻塞十几秒。
   // 新终端会读取注册表；软件子进程由 prependProcessPath 立即生效。
 }
@@ -377,6 +396,7 @@ module.exports = {
   collectToolchainPathDirs,
   readWindowsUserPath,
   writeWindowsUserPath,
+  invalidateUserPathCache,
   mergePathEntries,
   resolveShellProfile,
   updateManagedShellPath,

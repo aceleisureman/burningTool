@@ -234,12 +234,124 @@
           </div>
         </section>
       </el-form>
+
+      <!-- ════ 内存监控（采样日志，用于排查内存增长 / 验证优化效果）════ -->
+      <section class="set-card mem-card">
+        <div class="set-card-h">
+          <el-icon><DataLine /></el-icon>
+          <div>
+            <span>内存监控</span>
+            <small>实时采样主进程 / 渲染进程 / GPU 的内存占用，记录成日志便于对比优化前后</small>
+          </div>
+          <el-tag
+            v-if="memLatest"
+            class="set-card-status"
+            :type="memGrowthMb > 20 ? 'danger' : (memGrowthMb > 5 ? 'warning' : 'success')"
+            size="small"
+            round
+          >
+            合计 {{ memLatest.total }} MB
+          </el-tag>
+        </div>
+
+        <div v-if="!memSupported" class="set-hint">当前环境不支持内存采集（需在 Electron 中运行）。</div>
+
+        <template v-else>
+          <!-- 概览卡片 -->
+          <div class="mem-stats">
+            <div class="mem-stat mem-stat-total">
+              <span class="mem-stat-label">合计工作集</span>
+              <span class="mem-stat-value">{{ memLatest ? memLatest.total : '—' }}<i>MB</i></span>
+              <span class="mem-stat-sub">峰值 {{ memPeakTotalMb }} MB</span>
+            </div>
+            <div class="mem-stat">
+              <span class="mem-stat-label">主进程</span>
+              <span class="mem-stat-value">{{ memLatest ? memLatest.main : '—' }}<i>MB</i></span>
+              <span class="mem-stat-sub">JS 堆 {{ memLatest ? memLatest.mainHeapUsed : '—' }} MB</span>
+            </div>
+            <div class="mem-stat">
+              <span class="mem-stat-label">渲染进程</span>
+              <span class="mem-stat-value">{{ memLatest ? memLatest.renderer : '—' }}<i>MB</i></span>
+              <span class="mem-stat-sub">
+                JS 堆 {{ memLatest && memLatest.heapUsed != null ? memLatest.heapUsed : '—' }} MB
+              </span>
+            </div>
+            <div class="mem-stat">
+              <span class="mem-stat-label">GPU 进程</span>
+              <span class="mem-stat-value">{{ memLatest ? memLatest.gpu : '—' }}<i>MB</i></span>
+              <span class="mem-stat-sub">进程数 {{ memLatest ? memLatest.processCount : '—' }}</span>
+            </div>
+          </div>
+
+          <!-- 渲染进程 JS 堆占用条（相对 V8 上限） -->
+          <div class="mem-heap" v-if="memLatest && memLatest.heapLimit">
+            <div class="mem-heap-head">
+              <span>渲染进程 JS 堆</span>
+              <span>{{ memLatest.heapUsed }} / {{ memLatest.heapLimit }} MB（上限）</span>
+            </div>
+            <el-progress
+              :percentage="Math.min(100, Math.round((memLatest.heapUsed / memLatest.heapLimit) * 1000) / 10)"
+              :stroke-width="8"
+              :show-text="false"
+            />
+          </div>
+
+          <!-- 控制区 -->
+          <div class="mem-controls">
+            <el-form-item label="采样间隔" class="mem-interval">
+              <el-radio-group :model-value="memIntervalMs" @update:model-value="memSetInterval">
+                <el-radio-button v-for="opt in memIntervalOptions" :key="opt.value" :value="opt.value">
+                  {{ opt.label }}
+                </el-radio-button>
+              </el-radio-group>
+            </el-form-item>
+            <div class="mem-actions">
+              <el-button type="primary" :icon="memSampling ? VideoPause : VideoPlay" @click="memToggle">
+                {{ memSampling ? '停止采样' : '开始采样' }}
+              </el-button>
+              <el-button :icon="RefreshRight" @click="memSampleNow">立即采样</el-button>
+              <el-button :icon="Delete" :disabled="!memSamples.length" @click="memClear">清空</el-button>
+              <el-button :icon="CopyDocument" :disabled="!memSamples.length" @click="memCopyLog">复制日志</el-button>
+              <el-button :disabled="!memSamples.length" @click="memExportCsv">导出 CSV</el-button>
+              <el-button :loading="memGcBusy" @click="memGc">触发 GC</el-button>
+            </div>
+          </div>
+
+          <div class="set-hint mem-note" v-if="memGcNote">{{ memGcNote }}</div>
+          <div class="set-hint mem-note mem-err" v-if="memError">采集失败：{{ memError }}</div>
+
+          <!-- 采样日志 -->
+          <div class="mem-log" v-if="memLogRows.length">
+            <div class="mem-log-head">
+              <span>时间</span><span>运行</span><span>合计</span><span>主进程</span>
+              <span>渲染</span><span>GPU</span><span>渲染JS堆</span>
+            </div>
+            <div class="mem-log-body">
+              <div class="mem-log-row" v-for="row in memLogRows" :key="row.t">
+                <span>{{ row.time }}</span>
+                <span class="mem-dim">{{ row.elapsed }}</span>
+                <span class="mem-strong">{{ row.total }}</span>
+                <span>{{ row.main }}</span>
+                <span>{{ row.renderer }}</span>
+                <span>{{ row.gpu }}</span>
+                <span>{{ row.heapUsed }}</span>
+              </div>
+            </div>
+            <div class="mem-log-foot">
+              共 {{ memLogRows.length }} 条（最多保留 300 条）· 首末对比 {{ memGrowthMb >= 0 ? '+' : '' }}{{ memGrowthMb }} MB
+            </div>
+          </div>
+          <div class="set-hint mem-note" v-else>
+            尚未采样。点「开始采样」后每 {{ memIntervalMs / 1000 }} 秒记录一次；持续观察可发现内存是否稳定或缓慢增长。
+          </div>
+        </template>
+      </section>
     </div>
   </div>
 </template>
 
 <script>
-import { computed, inject } from 'vue';
+import { computed, inject, onMounted } from 'vue';
 
 export default {
   setup() {
@@ -248,6 +360,10 @@ export default {
     const readyToolchainCount = computed(() => (
       (app.defaultToolchainItems.value || []).filter((item) => item.ready).length
     ));
+    // 首次进入设置页先采一次，让内存卡片立刻有数据（不自动开始持续采样，避免无谓开销）
+    onMounted(() => {
+      if (app.memSupported && app.memSupported.value && !app.memLatest.value) app.memSampleNow();
+    });
     return { ...app, readyToolchainCount };
   },
 };

@@ -29,7 +29,8 @@ export function useUpdate() {
       try {
         const s = await window.api.updateStatus();
         applyState(s);
-        if (['latest', 'downloaded', 'error', 'idle', 'installing'].includes(s.status)) stopPoll();
+        // 只在终态停止轮询；checking / downloading 继续跟踪
+        if (['latest', 'downloaded', 'error', 'idle'].includes(s.status)) stopPoll();
       } catch (e) { stopPoll(); }
     }, 1000);
   }
@@ -38,6 +39,8 @@ export function useUpdate() {
   }
 
   // 手动"检查更新"
+  // 主进程现在立即返回 ack（不等待下载完成），实际进度由 update-status 推送 +
+  // 轮询兜底呈现。因此这里不能在 invoke 返回后立刻停轮询，需等终态。
   async function checkUpdate() {
     if (updateChecking.value || updateInstalling.value) return;
     if (updateState.status === 'downloaded') return installUpdate();
@@ -59,7 +62,8 @@ export function useUpdate() {
       updateState.error = String(e && e.message || e);
     } finally {
       updateChecking.value = false;
-      if (['latest', 'downloaded', 'error', 'idle', 'installing'].includes(updateState.status)) stopPoll();
+      // 仅当已进入终态时才停止轮询；checking/downloading 交给推送与轮询继续驱动
+      if (['latest', 'downloaded', 'error', 'idle'].includes(updateState.status)) stopPoll();
     }
   }
 

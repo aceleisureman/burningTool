@@ -56,7 +56,8 @@ export default [
   },
   {
     rules: {
-      'no-empty': 'off',
+      // 允许空 catch（有意吞异常），但空函数体/空块仍报错
+      'no-empty': ['error', { allowEmptyCatch: true }],
       'no-useless-escape': 'off',
       'no-unused-vars': ['warn', {
         argsIgnorePattern: '^_',
@@ -65,6 +66,19 @@ export default [
       }],
       'vue/multi-word-component-names': 'off',
       'vue/no-v-html': 'off',
+    },
+  },
+  {
+    // CommonJS 模块包装参数 (module, exports, require, __dirname, __filename)
+    // 与测试里透传给内部模块的 (parent, isMain) 属有意保留，避免误报
+    files: ['**/*.js'],
+    rules: {
+      'no-unused-vars': ['warn', {
+        args: 'after-used',
+        argsIgnorePattern: '^(parent|isMain|module|exports|require)$|^_',
+        caughtErrorsIgnorePattern: '^_',
+        varsIgnorePattern: '^_',
+      }],
     },
   },
 ];

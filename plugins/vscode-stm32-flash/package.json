@@ -2,7 +2,7 @@
   "name": "mcu-assistant",
   "displayName": "%ext.displayName%",
   "description": "%ext.description%",
-  "version": "0.1.56",
+  "version": "0.1.57",
   "publisher": "leisureman",
   "engines": {
     "vscode": "^1.85.0"

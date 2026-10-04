@@ -156,8 +156,19 @@
                 <el-button class="qtool-icon" size="small" text :icon="Upload" aria-label="导入 JSON" @click="importQuickCmds" />
               </el-tooltip>
             </div>
-            <div class="quick-list">
-              <div v-for="(q, i) in quickCmds" :key="q.id" class="qcard" :class="{ on: q.enabled }">
+            <!-- 快捷指令可能上百条（每张卡 8 个 Element Plus 控件 ≈ 40 节点），
+                 全量渲染会让本页 DOM 冲到 4000+，切页时样式重算/重排明显卡顿。
+                 改用可变高度虚拟列表：只渲染视口内的卡片。 -->
+            <VirtualList
+              v-if="quickCmds.length"
+              class="quick-list"
+              :items="quickCmds"
+              item-key="id"
+              :estimate="118"
+              :gap="8"
+            >
+              <template #default="{ item: q, index: i }">
+              <div class="qcard" :class="{ on: q.enabled }">
                 <div class="qc-top">
                   <el-checkbox v-model="q.enabled" size="small" title="勾选后纳入循环发送" />
                   <el-input class="qc-name" v-model="q.name" size="small" placeholder="名称 / 备注" />
@@ -176,8 +187,9 @@
                   </el-select>
                 </div>
               </div>
-              <div v-if="quickCmds.length === 0" class="quick-empty">暂无快捷指令<br>点「添加」新建</div>
-            </div>
+              </template>
+            </VirtualList>
+            <div v-else class="quick-empty">暂无快捷指令<br>点「添加」新建</div>
           </div>
         </div>
 
@@ -221,9 +233,10 @@ import {
 } from '@element-plus/icons-vue';
 import SerialTerminal from '../components/SerialTerminal.vue';
 import SerialByteStats from '../components/SerialByteStats.vue';
+import VirtualList from '../components/VirtualList.vue';
 
 export default {
-  components: { SerialTerminal, SerialByteStats },
+  components: { SerialTerminal, SerialByteStats, VirtualList },
   data() {
     return { quickGroupsCollapsed: false, sendHistoryVisible: false };
   },

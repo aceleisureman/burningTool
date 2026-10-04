@@ -1,4 +1,4 @@
-import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, markRaw } from 'vue';
+import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, markRaw, triggerRef, isRef } from 'vue';
 import { highlightJson, fmtPayload, topicMatch, bytesToHex, hexToBytes, now } from '../util.js';
 
 const MQTT_MAX_SUBSCRIPTIONS = 256;
@@ -17,6 +17,10 @@ const MQTT_MAX_PERSIST_MESSAGE_CHARS = 16 * 1024;
 const MQTT_MAX_HEX_DISPLAY_BYTES = Math.floor((MQTT_MAX_MESSAGE_CHARS + 1) / 3);
 const DISPLAY_TRUNCATION_MARK = '\n… [显示内容已截断]';
 const PERSIST_TRUNCATION_MARK = '\n… [历史内容已截断]';
+// 渲染窗口：与串口终端同一思路——原始数组是唯一真源（普通数组、非响应式），
+// 只把「尾部 N 条」暴露给 v-for。避免 3000 条消息全量渲染 + 响应式 splice 的 O(N) 搬运。
+const MQTT_RENDER_WINDOW = 400;
+const MQTT_WINDOW_STEP = 300;
 
 function truncateChars(value, maxChars, marker = '') {
   const text = String(value ?? '');
@@ -57,7 +61,8 @@ function trimMessageHistory(conn) {
     const old = conn.messages[removeCount++];
     conn.messageChars -= old && old._weight ? old._weight : 0;
   }
-  if (removeCount) conn.messages.splice(0, removeCount);
+  // 一次性搬移（普通数组切片），不在响应式代理上做 splice
+  if (removeCount) conn.messages = conn.messages.slice(removeCount);
   if (conn.messageChars < 0) conn.messageChars = 0;
 }
 
@@ -66,6 +71,44 @@ function restoreMessages(items) {
   const state = { messages, messageChars: messages.reduce((sum, m) => sum + (m._weight || 0), 0) };
   trimMessageHistory(state);
   return state;
+}
+
+// ── 渲染窗口 ──────────────────────────────────────────────
+// 只把尾部窗口（默认 400 条）暴露给模板；向上翻看时按 MQTT_WINDOW_STEP 追加历史。
+// 窗口外的高频变化不触发重渲染，避免「每批消息都 diff 上千个 DOM 节点」。
+function computeMqttWindow(total, state) {
+  const back = MQTT_RENDER_WINDOW + (state.expandBack || 0);
+  const end = total;
+  const start = Math.max(0, end - back);
+  return { start, end };
+}
+
+// 同步真源 -> 窗口视图（仅在区间变化时替换数组引用，并通知依赖方）。
+// 注意：conn 是 reactive({ messagesView }) —— 若把 ref 放进 reactive，Vue 会自动解包，
+// 读取 conn.messagesView 拿到的已是数组本身，此时对「容器」属性赋值不会触发依赖更新，
+// 而 triggerRef 传普通数组是静默 no-op。因此这里同时兼容 ref 与普通数组两种形态：
+//   · ref（makeConn 内部持有）      -> 写 .value 并 triggerRef
+//   · 已解包数组（经 reactive 取出）-> 直接在容器对象上整体替换该属性，靠 reactive 追踪
+function syncWindow(messages, messagesView, state, container, key) {
+  const { start, end } = computeMqttWindow(messages.length, state);
+  if (start !== state.winFrom || end !== state.winTo) {
+    const next = messages.slice(start, end);
+    if (isRef(messagesView)) {
+      messagesView.value = next;
+    } else if (container && key) {
+      container[key] = next;          // reactive 属性替换 -> 触发依赖
+    } else if (Array.isArray(messagesView)) {
+      messagesView.splice(0, messagesView.length, ...next);
+    }
+    state.winFrom = start;
+    state.winTo = end;
+  }
+  state.dirty = false;
+  if (isRef(messagesView)) triggerRef(messagesView);
+}
+// 标记脏：合并同一 tick 内的多次追加，由调用方在合适时机统一 commit
+function markDirty(state) {
+  if (!state.dirty) state.dirty = true;
 }
 
 function persistableMessages(messages) {
@@ -124,7 +167,11 @@ export function useMqtt() {
     init = init || {};
     const restored = restoreMessages(init.messages);
     const initialId = typeof init.id === 'string' && init.id.trim().length <= 128 ? init.id.trim() : genConnId();
-    return reactive({
+    const messages = markRaw(restored.messages);          // 真源：普通数组，不走响应式代理
+    const messagesView = ref([]);                          // 渲染窗口（尾部 N 条）
+    const state = { dirty: false, winFrom: -1, winTo: -1, expandBack: 0 };
+    syncWindow(messages, messagesView, state);
+    const conn = reactive({
       id: initialId,
       name: configString(init.name, '新建连接') || '新建连接',
       url: configString(init.url, 'mqtt://broker.emqx.io:1883') || 'mqtt://broker.emqx.io:1883',
@@ -135,13 +182,19 @@ export function useMqtt() {
       clean: init.clean !== false,
       subs: Array.isArray(init.subs) ? init.subs.map((s) => { s = s || {}; return { topic: configString(s.topic), qos: Number(s.qos) || 0, color: s.color || nextMqttColor(), active: s.active !== false }; }) : [],
       connected: false, connecting: false,
-      messages: restored.messages,
+      messages,                                            // markRaw 普通数组
+      messagesView,                                        // 供模板渲染的窗口（reactive 会自动解包为数组，模板直接当数组用）
+      messageTotal: restored.messages.length,              // 响应式总条数（messages 为 markRaw，长度变化需单独反映）
+      _win: markRaw(state),                                // 窗口/脏标记等内部簿记（非响应式）
       messageChars: restored.messageChars,
       seq: restored.messages.reduce((max, m) => Math.max(max, Number(m.id) || 0), 0),
       pubTopic: configString(init.pubTopic), pubQos: init.pubQos != null ? Number(init.pubQos) : 0,
       pubRetain: !!init.pubRetain, pubHex: !!init.pubHex, pubSub: !!init.pubSub, pubText: '',
       rxHex: !!init.rxHex, autoScroll: true, timestamp: true
     });
+    // 初始窗口写入 reactive 容器，确保模板首帧就能拿到数据
+    if (conn._win.winFrom >= 0 || messages.length) syncWindow(conn.messages, conn.messagesView, conn._win, conn, 'messagesView');
+    return conn;
   }
   const mqttConns = ref([]);
   const activeConnId = ref(null);
@@ -152,24 +205,52 @@ export function useMqtt() {
   function connById(id) { return mqttConns.value.find((c) => c.id === id) || null; }
 
   function mqttScroll() { nextTick(() => { const el = mqttBox.value; const c = activeConn.value; if (el && c && c.autoScroll) el.scrollTop = el.scrollHeight; }); }
+
+  // 把某连接的窗口视图与真源同步（合并同一 tick 内的多次追加，只提交一次）。
+  // conn 为 reactive 对象：conn.messagesView 已是解包后的数组，必须经容器赋值才触发更新。
+  function commitConn(conn) {
+    if (!conn || !conn._win || !conn._win.dirty) return;
+    syncWindow(conn.messages, conn.messagesView, conn._win, conn, 'messagesView');
+    conn.messageTotal = conn.messages.length;
+  }
+  function commitActive() {
+    const c = activeConn.value;
+    if (c) commitConn(c);
+  }
+
   // 只落数据不触发滚动/持久化（批量接收时由调用方统一做一次）；
-  // 消息对象入列后字段不再变化，markRaw 避免 3000 条消息被逐个深度代理
+  // messages 为 markRaw 普通数组，push 不经过代理；窗口由 commitConn 统一提交
   function pushMsg(conn, dir, text, topic, meta, color, json) {
     const message = makeMessage({ id: ++conn.seq, dir, text, topic, meta, color, json, ts: now() });
     conn.messages.push(message);
     conn.messageChars = (Number(conn.messageChars) || 0) + (message._weight || 0);
     trimMessageHistory(conn);
+    if (conn._win) markDirty(conn._win);
   }
   function addMsg(conn, dir, text, topic, meta, color, json) {
     if (!conn) return;
     pushMsg(conn, dir, text, topic, meta, color, json);
-    if (conn === activeConn.value) mqttScroll();
+    if (conn === activeConn.value) { commitConn(conn); mqttScroll(); }
     persistMqtt();
+  }
+  // 向上翻看更早历史：扩大窗口并立即提交
+  function expandMqttWindow() {
+    const c = activeConn.value;
+    if (!c || !c._win) return;
+    const canExpand = (MQTT_RENDER_WINDOW + (c._win.expandBack || 0)) < c.messages.length;
+    if (!canExpand) return;
+    c._win.expandBack = (c._win.expandBack || 0) + MQTT_WINDOW_STEP;
+    c._win.dirty = true;
+    commitConn(c);
   }
   function clearMqtt() {
     if (activeConn.value) {
-      activeConn.value.messages = [];
-      activeConn.value.messageChars = 0;
+      const c = activeConn.value;
+      c.messages = markRaw([]);
+      c.messageChars = 0;
+      c.messageTotal = 0;
+      if (c._win) { c._win.expandBack = 0; c._win.winFrom = -1; c._win.winTo = -1; c._win.dirty = true; }
+      commitConn(c);
       persistMqtt();
     }
   }
@@ -198,7 +279,12 @@ export function useMqtt() {
     clearTimeout(mqttSaveT);
     mqttSaveT = setTimeout(doPersistMqtt, Math.min(400, Math.max(0, mqttSaveFirstReq + 3000 - t)));
   }
-  function selectConn(c) { activeConnId.value = c.id; mqttScroll(); }
+  function selectConn(c) {
+    activeConnId.value = c.id;
+    if (c._win) { c._win.expandBack = 0; c._win.dirty = true; }
+    commitConn(c);
+    mqttScroll();
+  }
   function openConnDlg(c) {
     if (c) { connDlg.editing = c.id; connDlg.name = c.name; connDlg.url = c.url; connDlg.clientId = c.clientId; connDlg.username = c.username; connDlg.password = c.password; connDlg.keepalive = c.keepalive; connDlg.clean = c.clean; }
     else { connDlg.editing = null; connDlg.name = 'MQTT-' + (mqttConns.value.length + 1); connDlg.url = 'mqtt://broker.emqx.io:1883'; connDlg.clientId = ''; connDlg.username = ''; connDlg.password = ''; connDlg.keepalive = 60; connDlg.clean = true; }
@@ -370,8 +456,11 @@ export function useMqtt() {
         const messages = byId.get(conn.id);
         if (!Array.isArray(messages)) continue;
         const restored = restoreMessages(messages);
-        conn.messages = restored.messages;
+        conn.messages = markRaw(restored.messages);
         conn.messageChars = restored.messageChars;
+        conn.messageTotal = restored.messages.length;
+        if (conn._win) { conn._win.expandBack = 0; conn._win.winFrom = -1; conn._win.winTo = -1; conn._win.dirty = true; }
+        commitConn(conn);
       }
     } catch {}
   }
@@ -431,7 +520,8 @@ export function useMqtt() {
         pushMsg(c, 'rx', fp.text, topic, metaParts.join(' · '), subColorFor(c, topic), fp.json);
         if (c === activeConn.value) touchedActive = true;
       }
-      if (touchedActive) mqttScroll();
+      // 整批消息只提交/滚动一次（窗口在 commitActive 内按需替换数组引用）
+      if (touchedActive) { commitActive(); mqttScroll(); }
       persistMqtt();
     });
     if (typeof offStatus === 'function') mqttEventOffs.push(offStatus);
@@ -451,6 +541,6 @@ export function useMqtt() {
   return {
     mqttSupported, mqttErrMsg, mqttConns, activeConnId, activeConn, mqttBox, subDraft, connDlg,
     selectConn, openConnDlg, saveConnDlg, delConn, connConnect, connDisconnect, addSub, removeSub, toggleSub, mqttPublish, mqttSendKey, clearMqtt, onPubSubToggle,
-    initFromConfig
+    initFromConfig, expandMqttWindow, MQTT_RENDER_WINDOW
   };
 }

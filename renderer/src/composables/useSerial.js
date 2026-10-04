@@ -1,4 +1,4 @@
-import { ref, reactive, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
+import { ref, reactive, computed, watch, nextTick, onMounted, onBeforeUnmount, triggerRef } from 'vue';
 import { portMainLabel, portSubLabel, cmdDelayMs, bytesToHex, hexToBytes, copyText } from '../util.js';
 import { useCommandHistory } from './useCommandHistory.js';
 
@@ -11,6 +11,10 @@ const SERIAL_MAX_HISTORY_CHARS = 4 * 1024 * 1024;
 const SERIAL_HISTORY_TRIM_CHARS = 3 * 1024 * 1024;
 const SERIAL_MAX_HISTORY_LINES = 3000;
 const SERIAL_HISTORY_TRIM_LINES = 2200;
+// 终端最多同时挂到 DOM 上的行数。历史上限（3000）远大于屏幕容量，
+// 全量渲染会让每批数据触发数千节点的 diff——只渲染尾部窗口，滚动到顶部时再按需回补。
+const TERM_RENDER_WINDOW = 600;
+const TERM_WINDOW_STEP = 400;
 
 const QUICK_COMMAND_JSON_EXAMPLE = `{
   "schema": "mcu-toolbox.serial-commands",
@@ -87,10 +91,112 @@ export function useSerial() {
     rxHex: false, txHex: false, autoScroll: true, timestamp: true,
     sendText: '', appendNewline: true, tx: 0, rx: 0
   });
+  // ── 终端行缓冲 ──
+  // 性能要点：行对象只写入不再修改，且渲染层只读，因此用一个普通数组做缓冲区，
+  // 通过 triggerRef 决定何时提交给 Vue。若直接用 ref([]) + splice(0, n) 淘汰旧行，
+  // Vue 的数组代理会把 splice 变成 O(N) 逐元素搬运（实测 3000 行时单次约 4-7ms），
+  // 高波特率下每批数据都触发一次，直接卡死界面。这里改为「尾部追加 + 窗口切片」，
+  // 每批只提交一次更新，且既有行对象引用不变，v-for 的 diff 只需处理新增行。
   const serialLines = ref([]);
-  const { items: sendHistory, record: recordSendHistory, clear: clearSendHistory } = useCommandHistory(30);
+  let lineBuf = [];                           // 原始（未代理）数组，作为唯一真源
   let serialLineChars = 0;
   let serialSeq = 0;
+  let lineDirty = false;                      // 已写入 lineBuf 但尚未提交给渲染层
+  // 两种状态：follow=true 时窗口贴着末尾（正常收数）；follow=false 时窗口锚定在
+  // anchorId 这一行（用户上滑在看历史），此时新数据不会把用户视野往前拽。
+  let followTail = true;
+  let anchorId = 0;
+  let winFrom = -1;                           // 上一帧渲染段的起止（buffer 内下标），用于跳过无谓重建
+  let winTo = -1;
+  function findIndexById(id) {
+    // 锚点在淘汰后可能已不存在；二分即可（id 单调递增）
+    let lo = 0, hi = lineBuf.length - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (lineBuf[mid].id < id) lo = mid + 1; else hi = mid - 1;
+    }
+    return lo;
+  }
+  function computeWindow() {
+    if (followTail) {
+      const winEnd = lineBuf.length;
+      return { start: Math.max(0, winEnd - TERM_RENDER_WINDOW), end: winEnd };
+    }
+    // 锚点在淘汰后可能已不存在：先判断是否落在当前缓冲区间内，否则恢复跟随
+    const anchorAlive = lineBuf.length > 0 && anchorId >= lineBuf[0].id && anchorId <= lineBuf[lineBuf.length - 1].id;
+    if (!anchorAlive) {
+      followTail = true;
+      const winEnd = lineBuf.length;
+      return { start: Math.max(0, winEnd - TERM_RENDER_WINDOW), end: winEnd };
+    }
+    // 锚定模式：让 anchorId 那一行落在窗口上部，便于向下阅读
+    const i = findIndexById(anchorId);
+    let start = Math.max(0, i - Math.floor(TERM_RENDER_WINDOW / 2));
+    const end = Math.min(lineBuf.length, start + TERM_RENDER_WINDOW);
+    start = Math.max(0, end - TERM_RENDER_WINDOW);
+    return { start, end };
+  }
+  function commitLines() {
+    if (!lineDirty) return;
+    lineDirty = false;
+    const { start, end } = computeWindow();
+    if (start !== winFrom || end !== winTo) {
+      serialLines.value = lineBuf.slice(start, end);
+      winFrom = start;
+      winTo = end;
+    }
+    triggerRef(serialLines);                  // ref.value 可能未变，显式提交一次更新
+  }
+  function trimLineBuffer() {
+    if (lineBuf.length <= SERIAL_MAX_HISTORY_LINES && serialLineChars <= SERIAL_MAX_HISTORY_CHARS) return;
+    let drop = 0;
+    let chars = serialLineChars;
+    while (lineBuf.length - drop > 1 &&
+           (lineBuf.length - drop > SERIAL_HISTORY_TRIM_LINES || chars > SERIAL_HISTORY_TRIM_CHARS)) {
+      const old = lineBuf[drop++];
+      chars -= old && old._weight ? old._weight : 0;
+    }
+    if (!drop) return;
+    lineBuf = lineBuf.slice(drop);            // 一次性搬移，不在代理上做 shift
+    serialLineChars = chars < 0 ? 0 : chars;
+  }
+  // 用户上滑离开末尾：把窗口锚定到当前可见的行，之后不再跟随新数据
+  function detachFromTail() {
+    if (!followTail) return;
+    const first = serialLines.value[0];
+    if (!first) return;
+    followTail = false;
+    anchorId = first.id;
+  }
+  // 用户滑回末尾：恢复跟随，窗口贴回最新数据
+  function followTailNow() {
+    if (followTail) { lineDirty = true; commitLines(); return; }
+    followTail = true;
+    lineDirty = true;
+    commitLines();
+  }
+  // 向上翻看更早的记录：锚点前移一段
+  function expandTermWindow() {
+    const { start } = computeWindow();
+    if (start <= 0) return false;
+    const nextStart = Math.max(0, start - TERM_WINDOW_STEP);
+    followTail = false;
+    anchorId = lineBuf[nextStart].id;
+    lineDirty = true;
+    commitLines();
+    return true;
+  }
+  const termWindowAtStart = computed(() => {
+    if (!lineBuf.length) return true;
+    if (followTail) return lineBuf.length <= TERM_RENDER_WINDOW;
+    const anchorAlive = anchorId >= lineBuf[0].id && anchorId <= lineBuf[lineBuf.length - 1].id;
+    if (!anchorAlive) return true;                       // 锚点已淘汰，即将回到跟随
+    return computeWindow().start <= 0;
+  });
+  const termLineTotal = computed(() => lineBuf.length);
+  const termFollowing = computed(() => followTail);
+
+  const { items: sendHistory, record: recordSendHistory, clear: clearSendHistory } = useCommandHistory(30);
   let rxTextBuffer = '';
   let rxFlushTimer = null;
   let rxDecoder = new TextDecoder();
@@ -293,21 +399,15 @@ export function useSerial() {
     return meta;
   }
   function pushTermLine(dir, text) {
-    // 行对象写入后字段不再变化，用普通对象即可；ref 数组本身负责触发更新
+    // 行对象写入后字段不再变化，直接进普通数组缓冲；提交由 commitLines 统一做
     const raw = String(text ?? '');
     const clipped = raw.length > SERIAL_MAX_LINE_CHARS ? raw.slice(0, SERIAL_MAX_LINE_CHARS) + '\n… [显示内容已截断]' : raw;
-    serialLines.value.push({ id: ++serialSeq, dir, text: clipped, ts: serialNow(), _weight: clipped.length, ...serialLineMeta(dir, clipped) });
-    serialLineChars += clipped.length;
-    if (serialLines.value.length > SERIAL_MAX_HISTORY_LINES || serialLineChars > SERIAL_MAX_HISTORY_CHARS) {
-      let removeCount = 0;
-      while (serialLines.value.length - removeCount > 1 &&
-             (serialLines.value.length - removeCount > SERIAL_HISTORY_TRIM_LINES || serialLineChars > SERIAL_HISTORY_TRIM_CHARS)) {
-        const old = serialLines.value[removeCount++];
-        serialLineChars -= old && old._weight ? old._weight : 0;
-      }
-      if (removeCount) serialLines.value.splice(0, removeCount);
-      if (serialLineChars < 0) serialLineChars = 0;
-    }
+    const line = { id: ++serialSeq, dir, text: clipped, ts: serialNow(), _weight: clipped.length,
+                   ...serialLineMeta(dir, clipped) };
+    lineBuf.push(line);
+    serialLineChars += line._weight;
+    lineDirty = true;
+    if (lineBuf.length > SERIAL_MAX_HISTORY_LINES || serialLineChars > SERIAL_MAX_HISTORY_CHARS) trimLineBuffer();
   }
   function addTerm(dir, text) {
     // 系统/发送消息一次性多行时也只滚动一次
@@ -320,15 +420,18 @@ export function useSerial() {
     rxTextBuffer = '';
     scheduleTermScroll();
   }
-  // 主进程已 30ms 攒批，渲染端再合并滚动：同一帧内多次 addRx 只 nextTick 一次
+  // 主进程已 30ms 攒批，渲染端把「提交行缓冲 + 滚动」合并到同一帧：
+  // 同一帧内多次 addRx/pushTermLine 只触发一次 Vue 更新、一次 scrollTop 写入。
   let scrollPending = false;
   function scheduleTermScroll() {
-    if (!serial.autoScroll || scrollPending) return;
+    if (scrollPending) return;
     scrollPending = true;
     nextTick(() => {
       scrollPending = false;
+      commitLines();                        // 唯一提交点：每帧最多一次
       const el = termBox.value;
-      if (el && serial.autoScroll) el.scrollTop = el.scrollHeight;
+      // 用户上滑查看历史时（followTail=false）不得把视野拽回底部
+      if (el && serial.autoScroll && followTail) el.scrollTop = el.scrollHeight;
     });
   }
   function addRxText(text) {
@@ -350,9 +453,23 @@ export function useSerial() {
     rxFlushTimer = null;
     rxDecoder = new TextDecoder();
   }
-  function clearTerm() { serialLines.value = []; serialLineChars = 0; serial.tx = 0; serial.rx = 0; resetRxTextState(); }
+  function clearTerm() {
+    lineBuf = [];
+    serialLineChars = 0;
+    followTail = true;
+    anchorId = 0;
+    winFrom = -1;
+    winTo = -1;
+    lineDirty = false;
+    serialLines.value = [];
+    triggerRef(serialLines);
+    serial.tx = 0;
+    serial.rx = 0;
+    resetRxTextState();
+  }
   async function copyTerm() {
-    const text = serialLines.value.map((l) => `[${l.ts}] ${l.badge || l.dir.toUpperCase() + '>'} ${l.text}`).join('\n');
+    // 复制走完整缓冲，不受渲染窗口限制
+    const text = lineBuf.map((l) => `[${l.ts}] ${l.badge || l.dir.toUpperCase() + '>'} ${l.text}`).join('\n');
     try { await copyText(text); ElMessage.success('已复制'); } catch { ElMessage.error('复制失败'); }
   }
 
@@ -583,6 +700,7 @@ export function useSerial() {
 
   return {
     serialSupported, serialErrMsg, baudRates, serial, serialReconnectStatus, serialLines, termBox, portChooser,
+    termWindowAtStart, termLineTotal, termFollowing, expandTermWindow, detachFromTail, followTailNow, commitLines, TERM_RENDER_WINDOW,
     quickFormatVisible, quickFormatTab, quickCommandFormatFields: QUICK_COMMAND_FORMAT_FIELDS,
     quickCommandJsonExample: QUICK_COMMAND_JSON_EXAMPLE, quickCommandAiPrompt: QUICK_COMMAND_AI_PROMPT,
     refreshPorts, portMainLabel, portSubLabel, quickCmds, looping, sendHistory, clearSendHistory,

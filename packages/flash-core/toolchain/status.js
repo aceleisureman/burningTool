@@ -110,15 +110,31 @@ function findBusyboxBin() {
   return '';
 }
 
+// 版本探测：单次 spawnSync 是同步阻塞，启动路径上 5 次串行会冻结 event loop。
+// 两道保护：
+//  1) 缩短单次 timeout（工具链 --version 是本地调用，正常 <200ms；2500ms 只在异常时兜底）
+//  2) 进程内缓存结果（同一进程重复查询不再 spawn；工具链安装后由 invalidateVersionCache 清除）
+const VERSION_PROBE_TIMEOUT_MS = 800;
+const versionCache = new Map();
+
+function invalidateVersionCache() {
+  versionCache.clear();
+}
+
 function commandVersion(cmd, args, tool) {
   if (!cmd) return '';
+  const cacheKey = `${tool}\u0000${cmd}`;
+  if (versionCache.has(cacheKey)) return versionCache.get(cacheKey);
+  let result = '';
   try {
-    const r = spawnSync(cmd, args, { encoding: 'utf8', timeout: 2500 });
+    const r = spawnSync(cmd, args, { encoding: 'utf8', timeout: VERSION_PROBE_TIMEOUT_MS, windowsHide: true });
     const text = `${r.stdout || ''}\n${r.stderr || ''}`;
-    return parseToolVersion(tool, text);
+    result = parseToolVersion(tool, text);
   } catch {
-    return '';
+    result = '';
   }
+  versionCache.set(cacheKey, result);
+  return result;
 }
 
 function parseToolVersion(tool, output) {
@@ -170,5 +186,6 @@ module.exports = {
   defaultToolchainStatus,
   supportedCommandTools,
   parseToolVersion,
-  buildEnv
+  buildEnv,
+  invalidateVersionCache
 };

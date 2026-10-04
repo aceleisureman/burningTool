@@ -110,10 +110,23 @@ export default defineConfig(({ command }) => ({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
-    chunkSizeWarningLimit: 2000,
+    // 恢复默认告警：此前被抬到 2000 等于关闭了「chunk 过大」提示
+    chunkSizeWarningLimit: 600,
+    sourcemap: false,
     rollupOptions: {
       input: {
         main: fileURLToPath(new URL('./renderer/index.html', import.meta.url)),
+      },
+      output: {
+        // 手动分包：只把「体积大、变更少、被广泛共享」的库拆出来。
+        // 注意：不要把整个 element-plus 强制塞进一个 chunk——它按需引入后
+        // 由 Rollup 自动 tree-shake + 分片，强行归并反而失去按需拆分的收益。
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined;
+          if (id.includes('@element-plus/icons-vue')) return 'el-icons';
+          if (id.includes('/vue/') || id.includes('@vue/') || id.includes('vue-demi')) return 'vue-vendor';
+          return undefined;
+        },
       },
     },
   },

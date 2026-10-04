@@ -39,9 +39,21 @@ let suppressUpdaterErrors = false;
 // mac 自管更新：已下载的 zip 与解析到的更新信息
 let macPending = null; // { version, zipPath, sha512, fileName, url }
 
-function setState(patch) {
+// ── 状态推送节流 ─────────────────────────────────────────
+// 下载进度可能每 1% 触发一次 setState，若每次都同步广播会与主程序争抢
+// 主进程事件循环与 IPC 通道。这里把广播合并到一个节流窗口内，最多每
+// UPDATE_BROADCAST_MS 推送一次最新快照；不改变 state 本身的实时性。
+let stateVersion = 0;
+let broadcastVersion = 0;
+let broadcastTimer = null;
+const UPDATE_BROADCAST_MS = 150;
+
+function setState(patch, opts) {
   state = Object.assign({}, state, patch);
-  broadcastState();
+  stateVersion++;
+  // opts.immediate：安装/下载完成等关键状态立即推送；其余按节流窗口合并
+  if (opts && opts.immediate) broadcastNow();
+  else scheduleBroadcast();
   return state;
 }
 
@@ -51,6 +63,33 @@ function getState() {
     platform: process.platform,
     isPackaged: app.isPackaged
   });
+}
+
+function scheduleBroadcast() {
+  if (broadcastTimer) return;
+  broadcastTimer = setTimeout(() => {
+    broadcastTimer = null;
+    flushBroadcast();
+  }, UPDATE_BROADCAST_MS);
+  // 定时器不应阻止进程退出
+  if (broadcastTimer.unref) broadcastTimer.unref();
+}
+
+function flushBroadcast() {
+  if (broadcastVersion === stateVersion) return;
+  broadcastVersion = stateVersion;
+  broadcastState();
+}
+
+// 立即广播：用于安装/完成等关键状态，避免被节流窗口拖延
+function broadcastNow() {
+  // 已立即推送最新快照，取消挂起的节流定时器，避免多余的一次重复推送
+  if (broadcastTimer) {
+    clearTimeout(broadcastTimer);
+    broadcastTimer = null;
+  }
+  broadcastVersion = stateVersion;
+  broadcastState();
 }
 
 function broadcastState() {
@@ -125,6 +164,37 @@ function requestText(inputUrl, redirects = 0) {
   });
 }
 
+/* ── 异步 FS 助手 ─────────────────────────────────────────
+ * 下载/校验/替换都发生在主进程。同步的 mkdirSync/unlinkSync/renameSync
+ * 会阻塞事件循环（大文件目录操作尤其在网络盘/杀软扫描下明显），
+ * 这里统一改为 Promise 版，避免更新流程卡住主程序。 */
+function fsMkdirp(dir) {
+  return fs.promises.mkdir(dir, { recursive: true });
+}
+
+async function fsUnlinkQuiet(filePath) {
+  try { await fs.promises.unlink(filePath); } catch {}
+}
+
+async function fsRename(from, to) {
+  // Windows 下目标存在时 rename 会失败，先尝试删除再重命名
+  try {
+    await fs.promises.rename(from, to);
+    return;
+  } catch (err) {
+    if (err && (err.code === 'EEXIST' || err.code === 'EPERM')) {
+      await fsUnlinkQuiet(to);
+      await fs.promises.rename(from, to);
+      return;
+    }
+    throw err;
+  }
+}
+
+function fsStatOrNull(filePath) {
+  return fs.promises.stat(filePath).catch(() => null);
+}
+
 function downloadFile(inputUrl, dest, onProgress, redirects = 0) {
   let url;
   try {
@@ -133,7 +203,7 @@ function downloadFile(inputUrl, dest, onProgress, redirects = 0) {
     return Promise.reject(e);
   }
   const tmp = dest + '.part';
-  const cleanupTmp = () => { try { fs.unlinkSync(tmp); } catch {} };
+  const cleanupTmp = () => { fsUnlinkQuiet(tmp); };
   cleanupTmp();
   return new Promise((resolve, reject) => {
     if (redirects > 8) return reject(new Error('too many redirects'));
@@ -155,46 +225,35 @@ function downloadFile(inputUrl, dest, onProgress, redirects = 0) {
         res.resume();
         return reject(new Error('HTTP ' + res.statusCode + ' for ' + url));
       }
-      fs.mkdirSync(path.dirname(dest), { recursive: true });
-      const total = parseInt(res.headers['content-length'] || '0', 10) || 0;
-      let received = 0;
-      let lastPct = -1;
-      const out = fs.createWriteStream(tmp);
-      res.on('data', (chunk) => {
-        received += chunk.length;
-        if (total > 0 && onProgress) {
-          const pct = Math.min(100, Math.round((received / total) * 100));
-          if (pct !== lastPct) {
-            lastPct = pct;
-            onProgress(pct, received, total);
-          }
-        }
-      });
-      res.pipe(out);
-      out.on('finish', () => {
-        out.close(() => {
-          try {
-            try { fs.unlinkSync(dest); } catch {}
-            fs.renameSync(tmp, dest);
-            resolve({ path: dest, size: received, url });
-          } catch (e) {
-            cleanupTmp();
-            reject(e);
+      // 先建目录（异步），避免同步 FS 阻塞主进程
+      fsMkdirp(path.dirname(dest)).then(() => {
+        const total = parseInt(res.headers['content-length'] || '0', 10) || 0;
+        let received = 0;
+        let lastPct = -1;
+        const out = fs.createWriteStream(tmp);
+        res.on('data', (chunk) => {
+          received += chunk.length;
+          if (total > 0 && onProgress) {
+            const pct = Math.min(100, Math.round((received / total) * 100));
+            if (pct !== lastPct) {
+              lastPct = pct;
+              onProgress(pct, received, total);
+            }
           }
         });
-      });
-      out.on('error', (e) => {
-        cleanupTmp();
-        reject(e);
-      });
-      res.on('error', (e) => {
-        cleanupTmp();
-        reject(e);
-      });
-      res.on('aborted', () => {
-        cleanupTmp();
-        reject(new Error('download aborted'));
-      });
+        res.pipe(out);
+        out.on('finish', () => {
+          out.close(() => {
+            fsRename(tmp, dest).then(
+              () => resolve({ path: dest, size: received, url }),
+              (e) => { cleanupTmp(); reject(e); }
+            );
+          });
+        });
+        out.on('error', (e) => { cleanupTmp(); reject(e); });
+        res.on('error', (e) => { cleanupTmp(); reject(e); });
+        res.on('aborted', () => { cleanupTmp(); reject(new Error('download aborted')); });
+      }).catch((e) => { cleanupTmp(); reject(e); });
     });
     req.on('timeout', () => { req.destroy(new Error('download timeout')); });
     req.on('error', (e) => { cleanupTmp(); reject(e); });
@@ -388,14 +447,14 @@ async function downloadAndVerifyMacPackage(url, dest, sha512, onProgress) {
   const result = await downloadFile(url, dest, onProgress);
   const got = await sha512File(dest);
   if (got !== sha512) {
-    try { fs.unlinkSync(dest); } catch {}
+    await fsUnlinkQuiet(dest);
     throw new Error('更新包校验失败（sha512 不匹配）');
   }
   return result;
 }
 
 async function macCheckAndDownload() {
-  setState({ status: 'checking', error: null, mode: 'mac-manual' });
+  setState({ status: 'checking', error: null, mode: 'mac-manual' }, { immediate: true });
   let resolved;
   try {
     resolved = await loadMacUpdateInfoWithFallback();
@@ -405,7 +464,7 @@ async function macCheckAndDownload() {
   let { yml, source } = resolved;
   const current = app.getVersion();
   if (!isNewerVersion(yml.version, current)) {
-    setState({ status: 'latest', version: yml.version, percent: 0, error: null, mode: 'mac-manual', source: source.kind });
+    setState({ status: 'latest', version: yml.version, percent: 0, error: null, mode: 'mac-manual', source: source.kind }, { immediate: true });
     return { ok: true, update: false, version: yml.version, state: getState() };
   }
   let zip;
@@ -420,7 +479,7 @@ async function macCheckAndDownload() {
     try {
       ({ yml, source } = await loadMacUpdateInfo(fallback));
       if (!isNewerVersion(yml.version, current)) {
-        setState({ status: 'latest', version: yml.version, percent: 0, error: null, mode: 'mac-manual', source: source.kind });
+        setState({ status: 'latest', version: yml.version, percent: 0, error: null, mode: 'mac-manual', source: source.kind }, { immediate: true });
         return { ok: true, update: false, version: yml.version, state: getState() };
       }
       zip = pickMacZipFile(yml, source);
@@ -434,20 +493,20 @@ async function macCheckAndDownload() {
     }
   }
 
-  setState({ status: 'downloading', version: yml.version, percent: 0, error: null, mode: 'mac-manual', source: source.kind });
+  setState({ status: 'downloading', version: yml.version, percent: 0, error: null, mode: 'mac-manual', source: source.kind }, { immediate: true });
   bus.send('发现新版本 v' + yml.version + '，正在通过' + source.label + '后台下载（mac 自管，绕过 ShipIt）…', 'info');
 
   const dest = path.join(macUpdateDir(), zip.fileName);
   // 若已有同版本文件且 sha 匹配，跳过下载
   let needDownload = true;
-  if (fs.existsSync(dest) && zip.sha512) {
-    try {
-      const got = await sha512File(dest);
-      if (got === zip.sha512) needDownload = false;
-    } catch {}
-  }
-  if (needDownload && fs.existsSync(dest)) {
-    try { fs.unlinkSync(dest); } catch {}
+  if (await fsStatOrNull(dest)) {
+    if (zip.sha512) {
+      try {
+        const got = await sha512File(dest);
+        if (got === zip.sha512) needDownload = false;
+      } catch {}
+    }
+    if (needDownload) await fsUnlinkQuiet(dest);
   }
   let downloadedUrl = zip.url;
   let downloadedSource = source.kind;
@@ -463,7 +522,7 @@ async function macCheckAndDownload() {
       if (source.provider !== 'generic') throw mirrorError;
       downloadedUrl = officialReleaseAssetUrl(yml.version, zip.reference);
       downloadedSource = 'github-fallback';
-      setState({ status: 'downloading', version: yml.version, percent: 0, error: null, mode: 'mac-manual', source: downloadedSource });
+      setState({ status: 'downloading', version: yml.version, percent: 0, error: null, mode: 'mac-manual', source: downloadedSource }, { immediate: true });
       bus.send('[更新] 镜像更新包下载或校验失败，回退 GitHub 官方源：' + (mirrorError && mirrorError.message ? mirrorError.message : mirrorError), 'warn');
       try {
         await downloadAndVerifyMacPackage(downloadedUrl, dest, zip.sha512, onProgress);
@@ -483,7 +542,7 @@ async function macCheckAndDownload() {
     fileName: zip.fileName,
     url: downloadedUrl
   };
-  setState({ status: 'downloaded', version: yml.version, percent: 100, error: null, mode: 'mac-manual', source: downloadedSource });
+  setState({ status: 'downloaded', version: yml.version, percent: 100, error: null, mode: 'mac-manual', source: downloadedSource }, { immediate: true });
   bus.send('新版本 v' + yml.version + ' 已下载完成', 'success');
   await maybePromptInstall(yml.version);
   return { ok: true, update: true, version: yml.version, state: getState() };
@@ -523,7 +582,7 @@ function quoteSh(s) {
  * 退出后由独立 shell 完成：解压 zip → 替换 .app → 重新打开
  * 不依赖 ShipIt，未签名包可用。
  */
-function launchMacManualInstaller(zipPath, appBundlePath) {
+async function launchMacManualInstaller(zipPath, appBundlePath) {
   const parentDir = path.dirname(appBundlePath);
   const appName = path.basename(appBundlePath);
   const staging = path.join(macUpdateDir(), 'staging-' + Date.now());
@@ -573,9 +632,9 @@ function launchMacManualInstaller(zipPath, appBundlePath) {
     ''
   ].join('\n');
 
-  fs.mkdirSync(macUpdateDir(), { recursive: true });
-  fs.writeFileSync(scriptPath, script, { encoding: 'utf8', mode: 0o755 });
-  try { fs.chmodSync(scriptPath, 0o755); } catch {}
+  await fsMkdirp(macUpdateDir());
+  await fs.promises.writeFile(scriptPath, script, { encoding: 'utf8', mode: 0o755 });
+  try { await fs.promises.chmod(scriptPath, 0o755); } catch {}
 
   // 独立会话后台跑，父进程退出后仍继续
   const child = spawn('/bin/bash', [scriptPath], {
@@ -588,7 +647,7 @@ function launchMacManualInstaller(zipPath, appBundlePath) {
 }
 
 async function macQuitAndInstall() {
-  if (!macPending || !macPending.zipPath || !fs.existsSync(macPending.zipPath)) {
+  if (!macPending || !macPending.zipPath || !(await fsStatOrNull(macPending.zipPath))) {
     return { ok: false, error: '未找到已下载的 mac 更新包，请重新检查更新' };
   }
   if (isRunningFromDmg()) {
@@ -600,7 +659,7 @@ async function macQuitAndInstall() {
   }
   // 权限探测：用户目录 / 应用程序文件夹
   try {
-    fs.accessSync(path.dirname(appBundle), fs.constants.W_OK);
+    await fs.promises.access(path.dirname(appBundle), fs.constants.W_OK);
   } catch {
     // 尝试打开 dmg/发布页作为回退
     const releaseUrl = 'https://github.com/' + OWNER + '/' + REPO + '/releases/latest';
@@ -612,7 +671,7 @@ async function macQuitAndInstall() {
   }
 
   installing = true;
-  setState({ status: 'installing', error: null, mode: 'mac-manual' });
+  setState({ status: 'installing', error: null, mode: 'mac-manual' }, { immediate: true });
   bus.send('[更新] 正在关闭串口/MQTT/子进程，随后用本地脚本替换应用…', 'step');
 
   let summary = {};
@@ -625,7 +684,7 @@ async function macQuitAndInstall() {
 
   try {
     try { app.removeAllListeners('activate'); } catch {}
-    const launched = launchMacManualInstaller(macPending.zipPath, appBundle);
+    const launched = await launchMacManualInstaller(macPending.zipPath, appBundle);
     bus.send('[更新] 已启动替换脚本: ' + launched.scriptPath, 'info');
     scheduleForceExit(8000);
     try { app.updateQuitPrepared = true; } catch {}
@@ -638,7 +697,7 @@ async function macQuitAndInstall() {
     try { app.updateQuitPrepared = false; } catch {}
     installing = false;
     const msg = normalizeUpdateError(err);
-    setState({ status: 'downloaded', error: msg, mode: 'mac-manual' });
+    setState({ status: 'downloaded', error: msg, mode: 'mac-manual' }, { immediate: true });
     bus.send('[更新] 启动本地安装失败: ' + msg, 'error');
     return { ok: false, error: msg, state: getState(), summary };
   }
@@ -685,15 +744,15 @@ function getUpdater() {
 
 function wireEvents(u) {
   u.on('checking-for-update', () => {
-    if (!installing) setState({ status: 'checking', error: null, mode: 'electron-updater', source: activeUpdateSource.kind });
+    if (!installing) setState({ status: 'checking', error: null, mode: 'electron-updater', source: activeUpdateSource.kind }, { immediate: true });
   });
   u.on('update-available', (info) => {
     if (installing) return;
-    setState({ status: 'downloading', version: info.version, percent: 0, error: null, mode: 'electron-updater', source: activeUpdateSource.kind });
+    setState({ status: 'downloading', version: info.version, percent: 0, error: null, mode: 'electron-updater', source: activeUpdateSource.kind }, { immediate: true });
     bus.send('发现新版本 v' + info.version + '，正在通过' + activeUpdateSource.label + '后台下载…', 'info');
   });
   u.on('update-not-available', () => {
-    if (!installing) setState({ status: 'latest', error: null, mode: 'electron-updater', source: activeUpdateSource.kind });
+    if (!installing) setState({ status: 'latest', error: null, mode: 'electron-updater', source: activeUpdateSource.kind }, { immediate: true });
   });
   u.on('download-progress', (p) => {
     if (installing) return;
@@ -705,7 +764,7 @@ function wireEvents(u) {
   u.on('update-downloaded', async (info) => {
     if (installing) return;
     const version = info && info.version ? info.version : state.version;
-    setState({ status: 'downloaded', version, percent: 100, error: null, mode: 'electron-updater', source: activeUpdateSource.kind });
+    setState({ status: 'downloaded', version, percent: 100, error: null, mode: 'electron-updater', source: activeUpdateSource.kind }, { immediate: true });
     bus.send('新版本 v' + version + ' 已下载完成', 'success');
     await maybePromptInstall(version);
   });
@@ -718,14 +777,14 @@ function wireEvents(u) {
       macCheckAndDownload().catch((e) => {
         const msg = normalizeUpdateError(e);
         if (installing) installing = false;
-        setState({ status: 'error', error: msg, mode: 'mac-manual' });
+        setState({ status: 'error', error: msg, mode: 'mac-manual' }, { immediate: true });
         bus.send('检查/下载更新失败: ' + msg, 'warn');
       });
       return;
     }
     const msg = normalizeUpdateError(err);
     if (installing) installing = false;
-    setState({ status: 'error', error: msg });
+    setState({ status: 'error', error: msg }, { immediate: true });
     const now = Date.now();
     if (now - lastErrorAt > 3000) {
       lastErrorAt = now;
@@ -737,7 +796,7 @@ function wireEvents(u) {
 async function runUpdaterAttempt(source) {
   const updater = getUpdater();
   configureUpdaterSource(updater, source);
-  setState({ status: 'checking', error: null, mode: 'electron-updater', source: source.kind });
+  setState({ status: 'checking', error: null, mode: 'electron-updater', source: source.kind }, { immediate: true });
 
   suppressUpdaterErrors = true;
   try {
@@ -835,15 +894,26 @@ function scheduleForceExit(ms) {
   if (forceExitTimer.unref) forceExitTimer.unref();
 }
 
-// 启动后延迟检查，避免拖慢首屏；开发模式（未打包）不检查
+// 启动后延迟检查，避免拖慢首屏；开发模式（未打包）不检查。
+// 关键：整个检查流程（含 DMG 探测、版本比较、网络请求）都放在
+// 延迟回调里执行，不在 whenReady 的同步链路上占用主进程时间。
 function checkOnStartup(delayMs) {
   if (!app.isPackaged) return;
-  if (isMac() && isRunningFromDmg()) {
-    bus.send('[更新] 检测到应用正在 DMG/只读卷中运行，自动更新可能失败；请先拖到「应用程序」文件夹再使用', 'warn');
-  }
-  setTimeout(() => {
-    checkNow().catch(() => {});
-  }, typeof delayMs === 'number' ? delayMs : 5000);
+  const wait = typeof delayMs === 'number' ? delayMs : 5000;
+  const timer = setTimeout(() => {
+    // 让出一帧，确保首屏渲染与其它启动任务优先完成
+    setImmediate(() => {
+      try {
+        if (isMac() && isRunningFromDmg()) {
+          bus.send('[更新] 检测到应用正在 DMG/只读卷中运行，自动更新可能失败；请先拖到「应用程序」文件夹再使用', 'warn');
+        }
+      } catch {}
+      checkNow().catch(() => {});
+    });
+  }, wait);
+  // 定时器不应阻止进程退出（用户可能在 5s 内就关掉窗口）
+  if (timer.unref) timer.unref();
+  return timer;
 }
 
 // 手动检查（供渲染层"检查更新"按钮调用）
@@ -859,7 +929,7 @@ async function checkNow() {
       return await macCheckAndDownload();
     } catch (err) {
       const msg = normalizeUpdateError(err);
-      setState({ status: 'error', error: msg, mode: 'mac-manual' });
+      setState({ status: 'error', error: msg, mode: 'mac-manual' }, { immediate: true });
       return { ok: false, error: msg, state: getState() };
     }
   }
@@ -869,7 +939,7 @@ async function checkNow() {
     return { ok: true, state: getState(), updateInfo: result && result.updateInfo ? result.updateInfo : null };
   } catch (err) {
     const msg = normalizeUpdateError(err);
-    setState({ status: 'error', error: msg });
+    setState({ status: 'error', error: msg }, { immediate: true });
     return { ok: false, error: msg, state: getState() };
   }
 }
@@ -886,7 +956,7 @@ async function quitAndInstall(opts) {
   }
 
   installing = true;
-  setState({ status: 'installing', error: null, mode: 'electron-updater' });
+  setState({ status: 'installing', error: null, mode: 'electron-updater' }, { immediate: true });
   bus.send('[更新] 正在关闭串口/MQTT/子进程并准备安装…', 'step');
 
   let summary = {};
@@ -910,7 +980,7 @@ async function quitAndInstall(opts) {
     try { app.updateQuitPrepared = false; } catch {}
     installing = false;
     const msg = normalizeUpdateError(err);
-    setState({ status: 'downloaded', error: msg });
+    setState({ status: 'downloaded', error: msg }, { immediate: true });
     bus.send('[更新] 启动安装失败: ' + msg, 'error');
     return { ok: false, error: msg, state: getState(), summary };
   }

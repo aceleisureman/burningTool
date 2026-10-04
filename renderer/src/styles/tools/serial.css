@@ -53,6 +53,17 @@
     .s-line.trace .msg, .s-line.continuation .msg { color: var(--term-trace); }
     .term-empty { color: var(--text-dim); text-align: center; margin-top: 60px; font-family: sans-serif; }
     .term-empty .big { font-size: 34px; opacity: .3; margin-bottom: 8px; }
+    /* 渲染窗口未覆盖到缓冲起点时的「更早记录」提示 */
+    .term-more { position: sticky; top: 0; z-index: 1; padding: 4px 8px 6px; margin-bottom: 6px;
+      font-family: sans-serif; font-size: 11.5px; color: var(--text-dim); text-align: center;
+      background: linear-gradient(180deg, var(--term-bg) 62%, transparent); cursor: pointer; }
+    .term-more:hover { color: var(--accent); }
+    /* 脱离跟随（正在看历史）时的「回到最新」按钮 */
+    .term-latest { position: sticky; bottom: 4px; z-index: 2; display: block; margin: 6px auto 0;
+      padding: 3px 12px; border: 1px solid var(--border); border-radius: 999px; cursor: pointer;
+      font-family: sans-serif; font-size: 11.5px; color: var(--text-soft);
+      background: var(--bg-2); box-shadow: 0 2px 8px rgba(15,23,42,.18); }
+    .term-latest:hover { color: var(--accent); border-color: var(--accent-line); }
     .send-bar { display: flex; gap: 8px; align-items: stretch; min-width: 0; }
     .send-bar .el-textarea, .send-bar .el-input { flex: 1; min-width: 0; }
     .serial-compose { display: grid; grid-template-columns: minmax(0, 1fr) 160px; gap: 8px; padding-top: 1px; }
@@ -181,6 +192,8 @@
     .serial-right .qcard {
       gap: 7px; padding: 9px; border-left-width: 3px; border-radius: 6px; background: var(--panel);
       box-shadow: 0 1px 2px rgba(8,15,29,.04);
+      /* 注意：这里不要加 content-visibility:auto —— 虚拟列表需要实测 offsetHeight 来定位，
+         而 content-visibility 会让视口外元素返回占位高度而非真实高度，破坏测量。 */
     }
     .serial-right .qcard:hover { border-color: var(--border-2); box-shadow: 0 2px 6px rgba(8,15,29,.07); }
     .serial-right .qcard.on { border-color: var(--border); border-left-color: var(--accent); background: var(--panel); }
@@ -194,6 +207,22 @@
     .serial-right .qcard .qc-bot .lbl { margin-left: auto; }
     .serial-right .qcard .qc-int { width: 66px; }
     .serial-right .qcard .qc-unit { width: 68px; }
+
+    /* ── 虚拟列表（VirtualList.vue）──────────────────────────────
+       只渲染视口内的卡片，其余用占位高度撑起滚动条。
+       必须覆盖 mqtt.css 里 .quick-list 的 display:flex/gap —— 虚拟条目是 position:absolute
+       定位的，flex 会干扰布局；这里用 .serial-right 前缀提高特异性（serial.css 在 mqtt.css
+       之前引入，同特异性下后者会赢）。 */
+    .serial-right .quick-list.vlist {
+      display: block; position: relative; overflow-y: auto; overflow-x: hidden;
+      flex: 1; min-height: 0; padding-right: 4px;
+      scrollbar-color: var(--scroll) transparent;
+    }
+    .serial-right .quick-list.vlist::-webkit-scrollbar { width: 7px; }
+    .serial-right .quick-list.vlist::-webkit-scrollbar-thumb { border-radius: 4px; background: var(--scroll); }
+    .serial-right .vlist-inner { position: relative; width: 100%; }
+    .serial-right .vlist-item { position: absolute; left: 0; right: 0; }
+    .serial-right .vlist-item > .qcard { width: 100%; box-sizing: border-box; }
     .quick-format-dialog .el-dialog__header {
       background: var(--panel-2); border-bottom-color: var(--border);
     }

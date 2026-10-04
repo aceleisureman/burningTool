@@ -19,7 +19,7 @@ const {
   findPythonCommand,
   migrateLegacyToolchainIfNeeded
 } = require('./paths');
-const { APPLETS, systemLogLabel, defaultToolchainStatus } = require('./status');
+const { APPLETS, systemLogLabel, defaultToolchainStatus, invalidateVersionCache } = require('./status');
 
 const MANAGED_DOWNLOAD_DIRS = new Set(['gcc', 'make', 'openocd']);
 
@@ -517,6 +517,10 @@ async function installDefaultToolchain(cfg = {}, opts = {}) {
   } finally {
     bus.sendDownloadProgress('', 100); // 收尾：通知渲染端结束进度
   }
+
+  // 安装/更新后清空版本探测缓存，否则 defaultToolchainStatus() 会返回旧版本号
+  // （commandVersion 进程内缓存，见 status.js）。
+  try { invalidateVersionCache(); } catch {}
 
   const st = defaultToolchainStatus();
   bus.send(`[环境] ARM GCC bin: ${st.gccBin || '未找到'}`, st.gccBin ? 'info' : 'error');

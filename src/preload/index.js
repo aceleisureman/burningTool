@@ -74,5 +74,11 @@ contextBridge.exposeInMainWorld('api', {
   updateStatus:     () => ipcRenderer.invoke('update-status'),   // 当前更新状态/进度
   updateInstall:    () => ipcRenderer.invoke('update-install'),  // 重启并安装已下载的更新
   onUpdateStatus:   (cb) => onRendererEvent('update-status', cb), // 主进程主动推送状态（下载进度/完成）
-  copyToClipboard:  (text) => ipcRenderer.invoke('clipboard-write', text)  // 收到消息
+  copyToClipboard:  (text) => ipcRenderer.invoke('clipboard-write', text),  // 收到消息
+  // ── 启动性能探针（MCU_STARTUP_PROFILE=1 时才有数据）──
+  startupMark:      (name, rendererAt) => ipcRenderer.invoke('startup-mark', name, rendererAt),
+  startupProfile:   () => ipcRenderer.invoke('startup-profile'),
+  // ── 内存监控（设置页采样用）──
+  memoryStats:      () => ipcRenderer.invoke('app-memory-stats'),   // 各进程内存快照
+  memoryGc:         () => ipcRenderer.invoke('app-memory-gc')       // 触发主进程 GC
 });

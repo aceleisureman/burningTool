@@ -1,11 +1,12 @@
-<!-- MQTT 消息条数：隔离 activeConn.messages 订阅，避免 App 主模板被每条消息拖动 -->
+<!-- MQTT 消息条数：隔离订阅，避免 App 主模板被每条消息拖动。
+     注意 messages 现在是 markRaw 普通数组（长度变化不响应式），改用响应式的 messageTotal。 -->
 <script>
 import { inject, computed } from 'vue';
 export default {
   name: 'MqttMsgCount',
   setup() {
     const { activeConn } = inject('mqtt');
-    const count = computed(() => (activeConn.value && activeConn.value.messages ? activeConn.value.messages.length : 0));
+    const count = computed(() => (activeConn.value ? (activeConn.value.messageTotal || 0) : 0));
     return { count };
   }
 };

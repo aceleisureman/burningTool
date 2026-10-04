@@ -1,5 +1,6 @@
 const { ipcMain } = require('electron');
 const { loadConfig } = require('../core/config');
+const profile = require('../core/startup-profile');
 const {
   toolsDir,
   isToolchainInstalled,
@@ -14,7 +15,7 @@ const {
 } = require('../toolchain/toolchain');
 
 function registerToolchainIpc({ send }) {
-  ipcMain.handle('toolchain-status', () => ({ installed: isToolchainInstalled('arm-gcc'), dir: toolsDir() }));
+  ipcMain.handle('toolchain-status', () => profile.span('ipc:toolchain-status', () => ({ installed: isToolchainInstalled('arm-gcc'), dir: toolsDir() })));
   ipcMain.handle('install-toolchain', async () => {
     try {
       return await installToolchain('arm-gcc');
@@ -24,8 +25,11 @@ function registerToolchainIpc({ send }) {
     }
   });
 
-  ipcMain.handle('default-toolchain-status', () => defaultToolchainStatus());
-  ipcMain.handle('toolchain-system-path-status', () => getSystemPathStatus());
+  // 注意：defaultToolchainStatus 内部是 5 次串行 spawnSync（gcc/make/pyocd/openocd/busybox
+  // 版本探测，单次 timeout 2500ms）。这是启动期最可能冻结 event loop 的同步任务，
+  // 故显式打点，便于用 MCU_STARTUP_PROFILE=1 定位。
+  ipcMain.handle('default-toolchain-status', () => profile.span('ipc:default-toolchain-status', () => defaultToolchainStatus()));
+  ipcMain.handle('toolchain-system-path-status', () => profile.span('ipc:toolchain-system-path-status', () => getSystemPathStatus()));
   ipcMain.handle('toolchain-system-path-add', () => syncSystemPath());
   ipcMain.handle('toolchain-system-path-remove', () => removeSystemPath());
 

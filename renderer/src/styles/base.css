@@ -1,8 +1,10 @@
-    /* 全局字体：阿里妈妈方圆体 VF */
+    /* 全局字体：阿里妈妈方圆体 VF（已子集化，见 scripts/subset-font.py）
+       —— 只保留界面实际用到的字形，体积从 2.4MB 降到 ~360KB。
+       可变轴 wght 200~700，与下方 font-weight 范围一致。 */
     @font-face {
       font-family: "Alimama FangYuanTi VF";
       src: url("../../fonts/AlimamaFangYuanTiVF-Thin.woff2") format("woff2");
-      font-weight: 100 900;
+      font-weight: 200 700;
       font-style: normal;
       font-display: swap;
     }

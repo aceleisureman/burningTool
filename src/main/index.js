@@ -1,8 +1,11 @@
 // 加载 polyfill（install() 内部用 setImmediate 延迟执行，
 // 先让 Electron 二进制 patch require('electron')，主进程代码首次 require 拿到真实 API）
+const profile = require('./core/startup-profile');
+profile.mark('main:entry');
 require('./electron-api');
 const path = require('path');
 const { app, BrowserWindow, ipcMain } = require('electron');
+profile.mark('main:electron-api');
 
 // 共享 flash-core：注入路径与配置加载器（必须在 require 领域模块前完成）
 const { setPathsContext, setConfigLoader } = require('../../packages/flash-core');
@@ -15,6 +18,7 @@ setPathsContext({
   isPackaged: () => !!app.isPackaged
 });
 setConfigLoader(() => loadDesktopConfig());
+profile.mark('main:context-ready');
 
 const bus = require('./core/bus');
 const httpApi = require('./core/http-server');
@@ -26,6 +30,7 @@ const { registerToolchainIpc } = require('./ipc/register-toolchain-ipc');
 const { registerProjectIpc } = require('./ipc/register-project-ipc');
 const { registerFlashIpc } = require('./ipc/register-flash-ipc');
 const { registerDebugIpc } = require('./ipc/register-debug-ipc');
+profile.mark('main:modules-loaded');
 
 installTrustedIpcGuard(ipcMain, windows.getMainWindow, windows.isTrustedRendererUrl);
 
@@ -89,6 +94,7 @@ registerToolchainIpc({ send });
 registerProjectIpc();
 registerFlashIpc({ send });
 registerDebugIpc();
+profile.mark('main:ipc-registered');
 
 // 单实例：已运行则聚焦已有窗口，不再开新实例
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
@@ -97,9 +103,10 @@ if (!gotSingleInstanceLock) {
 } else {
   app.on('second-instance', () => windows.focusOrCreate());
   app.whenReady().then(() => {
+    profile.mark('main:ready');
     // Dock 图标：用多尺寸 icns / 带边距 PNG。禁止未留边 1024 全幅图（会显大）。
     try { if (windows.applyDockIcon) windows.applyDockIcon(); } catch {}
-    windows.createWindow();
+    profile.span('main:createWindow', () => windows.createWindow());
     startHttpApiFromConfig();
     updater.checkOnStartup();
   });

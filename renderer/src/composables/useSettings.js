@@ -13,7 +13,15 @@ export function useSettings(deps) {
   const envReady   = ref(false);
   const installing = ref(false);
   const installingDefault = ref(false);
-  const defaultTc   = reactive({ gccBin: '', makeBin: '', busybox: false, pyocdBin: '', openocdBin: '', root: '', toolchainRootPath: '' });
+  // 显式声明主进程 defaultToolchainStatus() 可能返回的全部字段。
+  // 若只声明部分字段，Vue 无法对「后续 Object.assign 动态加入的属性」建立依赖，
+  // 会导致 toolVersionText/openToolDetail 读到 undefined、computed 不重算。
+  const defaultTc   = reactive({
+    gccBin: '', makeBin: '', busybox: false, pyocdBin: '', openocdBin: '', root: '', toolchainRootPath: '',
+    gccVersion: '', makeVersion: '', pyocdVersion: '', openocdVersion: '', busyboxVersion: '',
+    commandTools: [], platform: '', systemInfo: {},
+    searchRoots: [], supportsKeil: false, commandToolsMode: '', makeMode: ''
+  });
   const toolProgress = reactive({
     gcc: { percent: 0, active: false, status: 'idle', note: '' },
     make: { percent: 0, active: false, status: 'idle', note: '' },
@@ -93,12 +101,22 @@ export function useSettings(deps) {
   async function setUnderReset(v) { config.connectUnderReset = v; try { Object.assign(config, await window.api.saveConfig({ connectUnderReset: v })); } catch (_e) {} }
   const underResetModel  = computed({ get: () => config.connectUnderReset === true, set: (v) => setUnderReset(v) });
 
+  // 启动期关键路径：原先 getPlatform / getPlatformToolchain / getConfig 是 3 次串行
+  // IPC，每次都要等主进程 event loop。三者互不依赖，改为并行 → 关键路径从「和」变「最大」。
   async function loadConfig() {
     applyBrowserPlatformFallback();
-    try { platform.value = await window.api.getPlatform(); } catch (_e) { applyBrowserPlatformFallback(); }
-    try { Object.assign(toolchainProfile, await window.api.getPlatformToolchain()); } catch (_e) { applyBrowserPlatformFallback(); }
+    const [platformRes, profileRes, cfgRes] = await Promise.allSettled([
+      window.api.getPlatform(),
+      window.api.getPlatformToolchain(),
+      window.api.getConfig()
+    ]);
+    if (platformRes.status === 'fulfilled') platform.value = platformRes.value;
+    else applyBrowserPlatformFallback();
+    if (profileRes.status === 'fulfilled') Object.assign(toolchainProfile, profileRes.value);
+    else applyBrowserPlatformFallback();
     applyBrowserPlatformFallback();
-    const cfg = await window.api.getConfig(); Object.assign(config, cfg);
+    const cfg = cfgRes.status === 'fulfilled' ? cfgRes.value : {};
+    Object.assign(config, cfg);
     if (!isWindows.value) {
       if (config.flashMethod === 'keil') config.flashMethod = 'pyocd';
     }
