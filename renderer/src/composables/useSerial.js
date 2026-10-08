@@ -108,6 +108,9 @@ export function useSerial() {
   let anchorId = 0;
   let winFrom = -1;                           // 上一帧渲染段的起止（buffer 内下标），用于跳过无谓重建
   let winTo = -1;
+  const termWindowAtStart = ref(true);
+  const termLineTotal = ref(0);
+  const termFollowing = ref(true);
   function findIndexById(id) {
     // 锚点在淘汰后可能已不存在；二分即可（id 单调递增）
     let lo = 0, hi = lineBuf.length - 1;
@@ -145,6 +148,9 @@ export function useSerial() {
       winFrom = start;
       winTo = end;
     }
+    termWindowAtStart.value = start === 0;
+    termLineTotal.value = lineBuf.length;
+    termFollowing.value = followTail;
     triggerRef(serialLines);                  // ref.value 可能未变，显式提交一次更新
   }
   function trimLineBuffer() {
@@ -167,6 +173,7 @@ export function useSerial() {
     if (!first) return;
     followTail = false;
     anchorId = first.id;
+    termFollowing.value = false;
   }
   // 用户滑回末尾：恢复跟随，窗口贴回最新数据
   function followTailNow() {
@@ -186,16 +193,6 @@ export function useSerial() {
     commitLines();
     return true;
   }
-  const termWindowAtStart = computed(() => {
-    if (!lineBuf.length) return true;
-    if (followTail) return lineBuf.length <= TERM_RENDER_WINDOW;
-    const anchorAlive = anchorId >= lineBuf[0].id && anchorId <= lineBuf[lineBuf.length - 1].id;
-    if (!anchorAlive) return true;                       // 锚点已淘汰，即将回到跟随
-    return computeWindow().start <= 0;
-  });
-  const termLineTotal = computed(() => lineBuf.length);
-  const termFollowing = computed(() => followTail);
-
   const { items: sendHistory, record: recordSendHistory, clear: clearSendHistory } = useCommandHistory(30);
   let rxTextBuffer = '';
   let rxFlushTimer = null;
@@ -462,6 +459,9 @@ export function useSerial() {
     winTo = -1;
     lineDirty = false;
     serialLines.value = [];
+    termWindowAtStart.value = true;
+    termLineTotal.value = 0;
+    termFollowing.value = true;
     triggerRef(serialLines);
     serial.tx = 0;
     serial.rx = 0;
