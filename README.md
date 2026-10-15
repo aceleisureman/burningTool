@@ -51,10 +51,21 @@
 ├── plugins/
 │   └── vscode-stm32-flash/ # MCU-Assistant VS Code 扩展（复用 flash-core）
 │
-├── tests/                  # node:test 单元测试（23 个测试文件）
+├── tests/                  # node:test 单元测试
 ├── scripts/                # 开发辅助脚本（dev、stop、sync-ext-vendor、package-ext）
-└── assets/                 # 应用图标
+├── assets/                 # 应用图标
+│
+├── docs/                   # 架构、优化记录、设计规格
+├── .vscode/                # 调试配置与任务（已隐藏本地产物）
+├── artifacts/              # 本地发布产物，如 VS Code .vsix（自动生成，忽略）
+├── logs/                   # 本地性能报告和运行日志（按需生成，忽略）
+├── dist/                   # electron-builder 发布目录（自动生成，忽略）
+├── renderer/dist/          # Vite 渲染层产物（自动生成，忽略）
+├── toolchain/              # 下载的编译/烧录工具链（本地运行时目录）
+└── node_modules/           # npm 依赖（本地依赖目录）
 ```
+
+源码目录与本地产物目录分开管理：日常开发只需要关注 `src/`、`renderer/`、`packages/`、`plugins/`、`tests/`、`scripts/` 和 `assets/`。`dist/`、`renderer/dist/`、`toolchain/`、`node_modules/`、`artifacts/`、`logs/` 均属于本地生成或运行目录，已在工作区视图、搜索和文件监听中排除。
 
 ---
 
@@ -122,14 +133,14 @@ npm run start:prod # 先 build 再启动（模拟生产）
 
 ```bash
 npm run ext:sync     # 同步 flash-core 最新代码到扩展 vendor
-npm run ext:package  # 生成 .vsix
+npm run ext:package  # 生成 artifacts/extensions/*.vsix
 ```
 
 ---
 
 ## 打包发布
 
-打包产物输出到 `dist/`，Windows 同时生成 NSIS 安装包和便携版。
+桌面应用打包产物输出到 `dist/`，Windows 同时生成 NSIS 安装包和便携版；VS Code 扩展产物单独输出到 `artifacts/extensions/`，避免污染插件源码目录。
 
 ```bash
 npm run dist:win        # Windows x64
@@ -194,7 +205,7 @@ npm test
 
 ## 不入版本库的目录
 
-`toolchain/`、`tools/`、`node_modules/`、`dist/`、`renderer/dist/`、`*.vsix`、`plugins/**/vendor/` — 均已由 `.gitignore` 排除。
+`toolchain/`、`tools/`、`node_modules/`、`dist/`、`renderer/dist/`、`artifacts/`、`logs/`、`*.vsix`、`plugins/**/vendor/` — 均已由 `.gitignore` 排除。
 
 ---
 

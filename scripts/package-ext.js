@@ -15,6 +15,7 @@ const { spawnSync } = require('child_process');
 
 const root = path.resolve(__dirname, '..');
 const extDir = path.join(root, 'plugins', 'vscode-stm32-flash');
+const extensionOutDir = path.join(root, 'artifacts', 'extensions');
 const pkgPath = path.join(extDir, 'package.json');
 
 function run(cmd, args, cwd, shell = false) {
@@ -90,11 +91,12 @@ function main() {
     console.log(`[ext:package] 保持版本 ${oldVersion} (--no-bump)`);
   }
 
-  // 3) 清理旧 vsix（同目录），避免堆积
-  for (const name of fs.readdirSync(extDir)) {
+  // 3) 统一把打包产物放到 artifacts，避免污染插件源码目录
+  fs.mkdirSync(extensionOutDir, { recursive: true });
+  for (const name of fs.readdirSync(extensionOutDir)) {
     if (name.endsWith('.vsix')) {
       try {
-        fs.unlinkSync(path.join(extDir, name));
+        fs.unlinkSync(path.join(extensionOutDir, name));
         console.log(`[ext:package] 已删除旧包: ${name}`);
       } catch {
         /* ignore */
@@ -102,24 +104,25 @@ function main() {
     }
   }
 
-  // 4) 打包
+  // 4) 打包。传相对路径可避免 Windows shell 处理带空格的仓库路径时出错。
+  const outName = `mcu-assistant-${kind === 'none' ? oldVersion : newVersion}.vsix`;
+  const outPath = path.join(extensionOutDir, outName);
+  const outArg = path.relative(extDir, outPath);
   run(
     'npx',
-    ['--yes', '@vscode/vsce', 'package', '--no-dependencies', '--allow-missing-repository'],
+    ['--yes', '@vscode/vsce', 'package', '--no-dependencies', '--allow-missing-repository', '--out', outArg],
     extDir,
     process.platform === 'win32'
   );
 
-  const outName = `mcu-assistant-${kind === 'none' ? oldVersion : newVersion}.vsix`;
-  const outPath = path.join(extDir, outName);
   if (fs.existsSync(outPath)) {
     console.log(`[ext:package] 完成: ${outPath}`);
   } else {
     // vsce 文件名以 package.json version 为准
-    const found = fs.readdirSync(extDir).filter((f) => f.endsWith('.vsix'));
-    console.log(`[ext:package] 完成: ${found.map((f) => path.join(extDir, f)).join(', ')}`);
+    const found = fs.readdirSync(extensionOutDir).filter((f) => f.endsWith('.vsix'));
+    console.log(`[ext:package] 完成: ${found.map((f) => path.join(extensionOutDir, f)).join(', ')}`);
   }
-  console.log('[ext:package] 安装: code --install-extension plugins/vscode-stm32-flash/*.vsix --force');
+  console.log('[ext:package] 安装: code --install-extension artifacts/extensions/*.vsix --force');
 }
 
 main();

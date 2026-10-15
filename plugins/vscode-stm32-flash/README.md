@@ -43,8 +43,8 @@ npm run ext:package -- --minor    # 0.1.x → 0.2.0
 npm run ext:package -- --major    # 0.x.x → 1.0.0
 npm run ext:package -- --no-bump  # 不改版本
 
-# 产物：plugins/vscode-stm32-flash/mcu-assistant-<version>.vsix（已 gitignore）
-code --install-extension plugins/vscode-stm32-flash/mcu-assistant-*.vsix --force
+# 产物：artifacts/extensions/mcu-assistant-<version>.vsix（已 gitignore）
+code --install-extension artifacts/extensions/mcu-assistant-*.vsix --force
 ```
 
 > `vendor/flash-core` 是打包用拷贝，**不要手改**；源码只改 `packages/flash-core`，再 `npm run ext:sync`。  

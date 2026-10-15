@@ -11,7 +11,7 @@
     "stop": "node scripts/stop-electron.js",
     "restart": "npm run stop && npm start",
     "perf:startup": "node scripts/startup-monitor.js",
-    "perf:startup:x3": "node scripts/startup-monitor.js --runs 3 --json startup-report.json",
+    "perf:startup:x3": "node scripts/startup-monitor.js --runs 3 --json logs/startup-report.json",
     "test": "node --test",
     "lint": "eslint .",
     "pack": "vite build && electron-builder --dir",

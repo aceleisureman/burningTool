@@ -45,7 +45,7 @@ MCU_DISABLE_GPU=1 npm start      # dev.js 会追加 --disable-gpu 等参数
 
 ```bash
 npm run perf:startup                 # 单次测量
-npm run perf:startup:x3              # 连续 3 次取中位数，并写 startup-report.json
+npm run perf:startup:x3              # 连续 3 次取中位数，并写 logs/startup-report.json
 node scripts/startup-monitor.js --no-gpu   # 软件渲染环境
 ```
 
@@ -215,7 +215,7 @@ MCU_DISABLE_GPU=1 MCU_ELECTRON_ARGS="--disable-gpu-sandbox --use-angle=swiftshad
 
 ## 不要入版本库的目录
 
-`toolchain/`、`tools/`、`node_modules/`、`dist/`、`renderer/dist/`、`*.vsix`、`plugins/**/vendor/` —— 本地依赖、构建/打包生成物，`.gitignore` 已排除。打包配置排除 `resources/`，不要恢复重复工具链副本。
+`toolchain/`、`tools/`、`node_modules/`、`dist/`、`renderer/dist/`、`artifacts/`、`logs/`、`*.vsix`、`plugins/**/vendor/` —— 本地依赖、构建/打包生成物和运行报告，`.gitignore` 已排除。打包配置排除 `resources/`，不要恢复重复工具链副本。
 
 ## 测试
 

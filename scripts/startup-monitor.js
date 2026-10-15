@@ -36,7 +36,7 @@ function parseArgs(argv) {
     const a = argv[i];
     if (a === '--runs') opts.runs = Math.max(1, parseInt(argv[++i], 10) || 1);
     else if (a === '--no-gpu' || a === '--nogpu') opts.noGpu = true;
-    else if (a === '--json') opts.json = argv[++i] || 'startup-report.json';
+    else if (a === '--json') opts.json = argv[++i] || 'logs/startup-report.json';
     else if (a === '--keep-open') opts.keepOpen = true;
     else if (a === '--timeout') opts.timeoutMs = Math.max(5000, parseInt(argv[++i], 10) || 60000);
     else if (a === '-h' || a === '--help') { printHelp(); process.exit(0); }
@@ -651,6 +651,7 @@ async function main() {
 
   if (opts.json) {
     const out = path.isAbsolute(opts.json) ? opts.json : path.join(ROOT, opts.json);
+    fs.mkdirSync(path.dirname(out), { recursive: true });
     fs.writeFileSync(out, JSON.stringify({ generatedAt: new Date().toISOString(), platform: process.platform, opts, runs }, null, 2));
     console.log(`[监控] 明细已写入 ${out}\n`);
   }

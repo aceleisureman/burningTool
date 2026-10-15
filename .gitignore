@@ -13,6 +13,8 @@ dist/
 
 # Logs & temp
 *.log
+/logs/
+/artifacts/
 float-debug.txt
 *.tmp
 
@@ -47,7 +49,8 @@ plugins/**/vendor/
 # 字体子集化：完整原字体备份与临时字符集（源字体重在仓库外，本地保留用于重新子集化）
 renderer/fonts/*.full.woff2
 renderer/fonts/_subset_chars.txt
-startup-report.json
+# 兼容旧版脚本可能写入的根目录报告；当前脚本写入 logs/
+/startup-report.json
 
 # AI 助手本地工作记忆（工具状态，非项目源码；与 .vscode/ 同类）
 .workbuddy-ai/
