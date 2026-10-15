@@ -19,7 +19,9 @@ export default [
   js.configs.recommended,
   ...pluginVue.configs['flat/essential'],
   {
-    files: ['src/**/*.js', 'scripts/**/*.js', 'tests/**/*.js', 'packages/**/*.js', 'plugins/**/*.js'],
+    // 同时覆盖 .cjs：scripts/ 下的诊断脚本用 CommonJS（require + 异步 IIFE），
+    // 若漏配此模式，其中的 require/process/console 会被判成 no-undef。
+    files: ['src/**/*.{js,cjs}', 'scripts/**/*.{js,cjs}', 'tests/**/*.{js,cjs}', 'packages/**/*.{js,cjs}', 'plugins/**/*.{js,cjs}'],
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'commonjs',
