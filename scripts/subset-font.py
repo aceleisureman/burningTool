@@ -79,6 +79,15 @@ CJK_PUNCT_RANGES = [
     (0xFF00, 0xFFEF),  # 全角
 ]
 
+# ⚠️ 为什么必须丢弃 STAT：
+# 该字体的 STAT（样式属性表）内 AxisValue 记录的 AxisIndex 越界（字体只有 wght/BEVL
+# 两个轴，记录却引用了不存在的轴）。Chromium 的 OTS 会因此直接拒绝整个字体，报
+# "Failed to decode downloaded font / Unable to instantiate font face from font data"，
+# 界面静默回退到系统字体——而 fontTools 能容忍这个错误，所以本地查不出来。
+# STAT 仅用于操作系统的字形样式分组，对应用内嵌字体毫无影响，丢弃是安全的。
+# 回归验证：改完字体后跑 `npx electron scripts/verify-font.js`（详见该文件的注释），
+# 它会用 Chromium 实跑一遍 @font-face 解析，两端都通过才算修好。
+
 
 def collect_chars():
     chars = set(BASE_CHARS)
@@ -133,7 +142,8 @@ def main():
     with open(text_path, "w", encoding="utf-8") as fh:
         fh.write("".join(sorted(chars)))
 
-    before = os.path.getsize(SRC_FONT)
+    # 基线取完整字体（BACKUP），而非即将被覆盖的旧子集，否则打印的压缩比没有意义
+    before = os.path.getsize(BACKUP) if os.path.exists(BACKUP) else os.path.getsize(SRC_FONT)
     cmd = [
         sys.executable, "-m", "fontTools.subset",
         BACKUP,
@@ -142,7 +152,7 @@ def main():
         "--layout-features=*",       # 保留字距/连字等排版特性
         "--no-hinting",              # 桌面端渲染不需要 hinting，显著减小
         "--desubroutinize",
-        "--drop-tables+=BEVL",       # 丢弃未使用的 BEVL 可变轴
+        "--drop-tables+=BEVL,STAT",  # BEVL 未使用的可变轴；STAT 必须丢弃，见下
         "--name-IDs=*",
         "--recalc-bounds",
         "--output-file=" + OUT_FONT,
