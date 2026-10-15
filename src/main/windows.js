@@ -284,6 +284,60 @@ function createWindow() {
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   mainWindow.webContents.on('will-navigate', guardNavigation);
   mainWindow.webContents.on('will-redirect', guardNavigation);
+
+  // 打包后白屏排查：生产环境没有 DevTools，加载失败 / preload 异常 / 渲染进程崩溃
+  // 往往只剩「白屏」这一个症状。诊断信息必须同时写 stdout：渲染层挂掉时 stdout 仍在。
+  //
+  // 但只有「结构性故障」（加载失败 / preload 抛错 / 渲染进程退出 / 页面无响应）才推给日志总线。
+  // 控制台消息一律不推：它量大且多为环境噪声（字体解析失败、ResizeObserver 循环之类），
+  // 一旦进了总线就会把烧录 / 编译这些真正的业务输出整屏冲掉。这类噪声看 stdout 就够。
+  // 普通控制台日志默认不输出，MCU_LOG_RENDERER=1 时全量输出。
+  const logAllRendererConsole = String(process.env.MCU_LOG_RENDERER || '').trim() === '1';
+  const reportRenderer = (text, type, toBus = false) => {
+    try { console[type === 'error' ? 'error' : 'warn']('[renderer] ' + text); } catch {}
+    if (toBus) { try { bus.send(text, type); } catch {} }
+  };
+  const wc = mainWindow.webContents;
+  wc.on('did-fail-load', (_e, code, desc, url, isMainFrame) => {
+    reportRenderer(`[渲染] 资源加载失败 code=${code} ${desc} url=${url}${isMainFrame ? ' (主框架)' : ''}`, 'error', true);
+  });
+  wc.on('preload-error', (_e, preloadPath, error) => {
+    reportRenderer(`[渲染] preload 抛错 ${preloadPath}: ${(error && error.message) || error}`, 'error', true);
+  });
+  wc.on('render-process-gone', (_e, details) => {
+    reportRenderer(`[渲染] 渲染进程退出: ${(details && details.reason) || '?'} exitCode=${(details && details.exitCode) || 0}`, 'error', true);
+  });
+  wc.on('unresponsive', () => reportRenderer('[渲染] 页面无响应', 'warn', true));
+  if (logAllRendererConsole) {
+    // 定位白屏时用：看加载走到哪一步就崩了
+    wc.on('did-start-loading', () => reportRenderer('[渲染] 开始加载', 'warn'));
+    wc.on('dom-ready', () => reportRenderer('[渲染] DOM 就绪', 'warn'));
+    wc.on('did-finish-load', () => reportRenderer('[渲染] 加载完成', 'warn'));
+    wc.on('did-stop-loading', () => reportRenderer('[渲染] 停止加载', 'warn'));
+  }
+  wc.on('console-message', (...args) => {
+    // Electron 旧签名 (event, level, message, line, sourceId)；36+ 改为 (event, details)
+    let level;
+    let message;
+    let line;
+    let sourceId;
+    if (args.length >= 5) {
+      [, level, message, line, sourceId] = args;
+    } else {
+      const d = args[1] || {};
+      level = d.level;
+      message = d.message;
+      line = d.lineNumber;
+      sourceId = d.sourceId;
+    }
+    // 归一化：旧版 level 是数字 0..3，新版是 'info' | 'warning' | 'error'
+    const isError = level === 3 || level === 'error';
+    const isWarn = level === 2 || level === 'warning';
+    if (!logAllRendererConsole && !isError && !isWarn) return;
+    const file = String(sourceId || '').split('/').pop().split('?')[0];
+    reportRenderer(`[渲染控制台] ${String(message)}  (${file}:${line || 0})`, isError ? 'error' : 'warn');
+  });
+
   loadRenderer(mainWindow, 'index.html');
 
   // 记忆窗口尺寸/位置：resize/move 去抖保存 + 关闭前再存一次

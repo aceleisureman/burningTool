@@ -529,13 +529,17 @@
 .term-content::-webkit-scrollbar-thumb { background: var(--scroll); border-radius: 5px; }
 .log-content::-webkit-scrollbar-thumb:hover,
 .term-content::-webkit-scrollbar-thumb:hover { background: var(--scroll-h); }
+/* 日志面板底色恒为 --term-bg（深色），所以正文色必须用「浅变体」：
+   直接用主题语义色在深底上对比度不足（error 仅 3.5:1）；更要紧的是
+   .msg 默认不继承色，未匹配类型的行会回落到浅色主题的 --text（1.1:1，几乎不可见）。
+   此处把 --log-info 设为默认正文色，并按深底提亮各语义色（均 ≥5.2:1）。 */
 .log-line { display: flex; gap: 9px; padding: 1px 0; white-space: pre-wrap; word-break: break-all; }
 .log-line .ts { flex-shrink: 0; color: var(--log-ts); }
-.log-line .msg { flex: 1; }
-.log-line.info .msg { color: var(--log-info); }
-.log-line.step .msg { color: var(--accent); font-weight: 600; }
-.log-line.success .msg { color: var(--ok); font-weight: 600; }
-.log-line.error .msg { color: var(--danger); font-weight: 600; }
+.log-line .msg { flex: 1; color: var(--log-info); }
+.log-line.step .msg { color: color-mix(in srgb, var(--accent) 75%, #fff); font-weight: 600; }
+.log-line.success .msg { color: color-mix(in srgb, var(--ok) 75%, #fff); font-weight: 600; }
+.log-line.warn .msg { color: color-mix(in srgb, var(--warn) 78%, #fff); font-weight: 600; }
+.log-line.error .msg { color: color-mix(in srgb, var(--danger) 68%, #fff); font-weight: 600; }
 .log-empty { margin-top: 46px; color: var(--text-dim); font-family: sans-serif; text-align: center; }
 .log-empty .big { margin-bottom: 8px; color: var(--accent); font-size: 38px; opacity: .35; }
 
