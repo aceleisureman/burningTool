@@ -44,7 +44,10 @@ export default {
       </span>
       <span class="msg">{{ ln.text }}</span>
     </div>
-    <div v-if="termLineTotal === 0" class="term-empty"><div class="big">⇄</div>暂无收发记录<br>连接串口后开始通信</div>
+    <div v-if="termLineTotal === 0" class="term-empty">
+      <div class="big">⇄</div>
+      暂无收发记录<br>先在上方工具栏「选择串口」识别设备，设好参数再点「连接」
+    </div>
     <button v-if="!termFollowing" class="term-latest" type="button" @click="backToLatest">↓ 回到最新</button>
   </div>
 </template>

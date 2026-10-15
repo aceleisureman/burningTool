@@ -2,11 +2,14 @@
      只渲染「视口内 + overscan」的条目，其余用占位高度撑起滚动条，
      因此上万条数据也只维持几十个 DOM 节点。
 
-     为什么不用固定高度方案：本项目的快捷指令卡片内含 autosize textarea（1~4 行），
-     高度随内容变化，固定高度会导致文字被裁切或留白，所以采用「估算 + 实测修正」：
+     为什么不用固定高度方案：本项目的快捷指令卡片高度会变（内容框未聚焦时 1 行、
+     聚焦编辑时展开到 4 行），固定高度会导致文字被裁切或留白，所以采用「估算 + 实测修正」：
        1. 未测量的条目先用 estimate 占位；
        2. 渲染后实测 offsetHeight 并回写，重算累计偏移；
        3. 已测过的条目高度被记住，滚动时不再跳动。
+
+     ⚠️ 条目自身变高（如内容框展开）不会改变容器尺寸，因此不会触发下面挂在容器上的
+     ResizeObserver。这种场景必须由父组件主动调用 measure() 重新测量，否则条目会互相重叠。
 
      用法：
        <VirtualList :items="list" item-key="id" :estimate="118" :gap="8" v-slot="{ item, index }">
@@ -153,7 +156,7 @@ export default {
     // 同组内增删条目：重新测量
     watch(() => props.items.length, () => { measure(); });
 
-    return { boxRef, onScroll, visible, totalHeight, setItemEl };
+    return { boxRef, onScroll, visible, totalHeight, setItemEl, measure };
   }
 };
 </script>

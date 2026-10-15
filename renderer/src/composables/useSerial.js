@@ -431,6 +431,32 @@ export function useSerial() {
       if (el && serial.autoScroll && followTail) el.scrollTop = el.scrollHeight;
     });
   }
+  // 恢复跟随并把视野推到底部。followTailNow 会重算渲染窗口，必须等 DOM 更新后
+  // 再写 scrollTop，否则读到的是旧内容高度，滚不到真正的底部。
+  function jumpToTail() {
+    followTailNow();
+    nextTick(() => {
+      const el = termBox.value;
+      if (el) el.scrollTop = el.scrollHeight;
+    });
+  }
+  // 「自动滚动」开关与 followTail 是两个独立状态：followTail 是被动的——用户上滑离开底部
+  // （阈值仅 24px）就会被置 false，此后 scheduleTermScroll 的写入被守卫拦下。
+  // 若只翻转开关而不理 followTail，就会出现「开关亮着、视野却停在历史位置」的割裂。
+  // 因此这里把点击语义统一为「让终端跟随最新」：
+  //   关闭       -> 开启，恢复跟随并跳到最新；
+  //   开启且跟随 -> 关闭（暂停）；
+  //   开启但被上滑暂停 -> 仍按「恢复跟随」处理，不关闭。此时开关已名不副实，
+  //                      关掉它不表达任何额外意图，恢复跟随才是用户点击的动机。
+  function setAutoScroll(on) {
+    const want = !!on;
+    if (!want && !(serial.autoScroll && !followTail)) {
+      serial.autoScroll = false;
+      return;
+    }
+    serial.autoScroll = true;
+    jumpToTail();
+  }
   function addRxText(text) {
     clearTimeout(rxFlushTimer);
     rxTextBuffer += String(text || '').replace(/\r/g, '');
@@ -700,7 +726,7 @@ export function useSerial() {
 
   return {
     serialSupported, serialErrMsg, baudRates, serial, serialReconnectStatus, serialLines, termBox, portChooser,
-    termWindowAtStart, termLineTotal, termFollowing, expandTermWindow, detachFromTail, followTailNow, commitLines, TERM_RENDER_WINDOW,
+    termWindowAtStart, termLineTotal, termFollowing, expandTermWindow, detachFromTail, followTailNow, setAutoScroll, commitLines, TERM_RENDER_WINDOW,
     quickFormatVisible, quickFormatTab, quickCommandFormatFields: QUICK_COMMAND_FORMAT_FIELDS,
     quickCommandJsonExample: QUICK_COMMAND_JSON_EXAMPLE, quickCommandAiPrompt: QUICK_COMMAND_AI_PROMPT,
     refreshPorts, portMainLabel, portSubLabel, quickCmds, looping, sendHistory, clearSendHistory,

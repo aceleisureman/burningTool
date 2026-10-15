@@ -1,42 +1,83 @@
     /* ── 串口调试工具 ── */
     .serial-body { flex: 1; display: flex; min-height: 0; overflow: hidden; gap: 0; }
     .serial-col { display: flex; flex-direction: column; min-height: 0; }
-    .serial-left { width: 248px; flex-shrink: 0; border-right: 1px solid var(--border); padding: 14px; overflow-y: auto; gap: 14px; }
     .serial-center { flex: 1; min-width: 0; padding: 12px 14px; gap: 10px; }
-    .serial-right { width: 312px; flex-shrink: 0; border-left: 1px solid var(--border); padding: 14px 12px 12px; overflow: hidden; background: var(--bg-2); }
+    .serial-right {
+      width: 312px; flex-shrink: 0; position: relative; border-left: 1px solid var(--border);
+      /* 上下各让出 12px（与 .serial-center 的内边距一致），使面板白底的顶边与终端卡片
+         顶边落在同一条线上。此前白底紧贴内容区顶边，比终端卡片高出 12px，形成台阶。 */
+      margin: 12px 0; padding: 12px; overflow: hidden; background: var(--bg-2);
+      transition: width .2s ease, padding .2s ease, background-color .2s ease, border-color .2s ease;
+    }
+    .serial-right.quick-panel {
+      transition: width .2s ease, padding .2s ease, background-color .2s ease, border-color .2s ease;
+    }
+    /* 收起时整列退到 0 宽：收折由页头「快捷指令」按钮显式控制，不再保留 36px 空轨道。
+       同时清零左边框，避免 0 宽下仍画出一条 1px 竖线 */
+    .serial-right.is-collapsed { width: 0; padding: 0; border-left-width: 0; }
+    .serial-right .quick-panel-content { display: flex; flex: 1; min-width: 0; min-height: 0; flex-direction: column; }
+    /* 页头的「快捷指令」收折开关（紧邻连接状态徽标）。
+       必须声明 no-drag：.pane-top 整体是 -webkit-app-region: drag，否则点击会被当作拖动窗口 */
+    .quick-panel-toggle.el-button {
+      -webkit-app-region: no-drag;
+      min-height: 26px; padding: 0 9px; gap: 4px; border-radius: 6px;
+      color: var(--text-soft); font-size: 11.5px; font-weight: 500;
+    }
+    .quick-panel-toggle.el-button:hover { color: var(--accent); background: var(--accent-soft); }
+    .quick-panel-toggle .qpt-caret { margin-left: 3px; font-size: 12px; }
     .panel-title { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 4px; letter-spacing: .4px; }
     .panel-sub { font-size: 11.5px; color: var(--text-dim); margin-bottom: 8px; line-height: 1.5; }
     .field { margin-bottom: 11px; }
     .field > label { display: block; font-size: 12px; color: var(--text-soft); margin-bottom: 5px; }
-    .serial-reconnect-control {
-      min-height: 56px; display: grid; grid-template-columns: 30px minmax(0, 1fr) 18px;
-      align-items: center; gap: 9px; padding: 7px 10px; border: 1px solid var(--border);
-      border-radius: 6px; background: var(--panel); color: var(--text-soft); cursor: pointer;
-      transition: background-color .15s ease, border-color .15s ease, box-shadow .15s ease;
-      outline: none;
-    }
-    .serial-reconnect-control:hover { background: var(--panel-2); border-color: var(--accent-line); }
-    .serial-reconnect-control:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
-    .serial-reconnect-control.on { background: var(--accent-soft); border-color: var(--accent-line); }
-    .serial-reconnect-control.busy { box-shadow: inset 3px 0 0 var(--accent); }
-    .serial-reconnect-control .src-icon {
-      width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center;
-      border-radius: 6px; background: var(--panel-2); color: var(--text-dim); font-size: 16px;
-    }
-    .serial-reconnect-control.on .src-icon { background: var(--panel); color: var(--accent); }
-    .serial-reconnect-control.busy .src-icon .el-icon { animation: serial-reconnect-spin 1.1s linear infinite; }
-    .serial-reconnect-control .src-copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; line-height: 1.2; }
-    .serial-reconnect-control .src-title { color: var(--text); font-size: 12px; font-weight: 600; }
-    .serial-reconnect-control .src-status { overflow: hidden; color: var(--text-dim); font-size: 10.5px; white-space: nowrap; text-overflow: ellipsis; }
-    .serial-reconnect-control.on .src-status { color: var(--text-soft); }
-    .serial-reconnect-control .src-check { margin-right: 0; }
-    .serial-reconnect-control .src-check .el-checkbox__label { display: none; }
     @keyframes serial-reconnect-spin { to { transform: rotate(360deg); } }
     .term-card { flex: 1; background: var(--term-bg); border: 1px solid rgba(15,23,42,.42); border-radius: 4px; display: flex; flex-direction: column; min-height: 0; overflow: hidden; box-shadow: inset 0 1px 0 rgba(255,255,255,.03); }
-    .term-bar { background: var(--bg-2); padding: 7px 12px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text-soft); }
+    .term-bar { background: var(--bg-2); padding: 7px 12px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text-soft); }
     .term-bar .tb-toggle { cursor: pointer; display: inline-flex; align-items: center; gap: 5px; transition: color .15s; }
     .term-bar .tb-toggle:hover { color: var(--accent); }
     .term-bar .tb-toggle.on { color: var(--accent); font-weight: 600; }
+    /* 自动滚动已开启、但被上滑暂停（followTail=false）：用告警色区分，
+       避免开关亮着却让人误以为仍在跟随最新 */
+    .term-bar .tb-toggle.suspended { color: var(--warn); font-weight: 500; }
+    .term-bar .tb-toggle.suspended:hover { color: var(--warn); }
+    /* 追加换行在 HEX 模式下不可用（HEX 按原始字节发送，不追加换行） */
+    .term-bar .tb-toggle.disabled { color: var(--text-dim); cursor: not-allowed; }
+    .term-bar .tb-toggle.disabled:hover { color: var(--text-dim); }
+    /* ── 连接组：原左栏「串口设置」搬入工具栏，为日志区腾出 248px ──
+       全部控件统一 24px 高，与 .tb-toggle / 小号按钮同一基线 */
+    .term-bar .tb-sep { width: 1px; align-self: stretch; min-height: 18px; background: var(--border); }
+    /* 口选择器：状态点 + 口名 + 下拉箭头。与「掉线重连」共用同一套视觉语言——
+       描边 = 关 / 强调色浅填充 = 开，避免只靠图标变色表达状态 */
+    .term-bar .tb-port {
+      display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 7px 0 9px;
+      border: 1px solid var(--border); border-radius: 6px; background: var(--panel);
+      color: var(--text-soft); font-size: 12px; cursor: pointer; white-space: nowrap;
+      transition: color .15s ease, border-color .15s ease, background-color .15s ease;
+    }
+    .term-bar .tb-port:hover { border-color: var(--accent-line); color: var(--accent); }
+    .term-bar .tb-port.idle { border-style: dashed; color: var(--text-dim); }
+    .term-bar .tb-port.on { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent); }
+    .term-bar .tb-port-dot { width: 7px; height: 7px; flex-shrink: 0; border-radius: 50%; background: var(--text-dim); }
+    .term-bar .tb-port.on .tb-port-dot { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 20%, transparent); }
+    .term-bar .tb-port-name { max-width: 92px; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+    .term-bar .tb-port-caret { font-size: 11px; color: var(--text-dim); transform: rotate(90deg); transition: color .15s ease; }
+    .term-bar .tb-port:hover .tb-port-caret, .term-bar .tb-port.on .tb-port-caret { color: var(--accent); }
+    .term-bar .tb-param { display: inline-flex; align-items: center; gap: 5px; }
+    .term-bar .tb-lbl { color: var(--text-dim); font-size: 11px; white-space: nowrap; }
+    .term-bar .tb-sel { width: 58px; }
+    .term-bar .tb-sel-baud { width: 84px; }
+    .term-bar .tb-sel-stop { width: 52px; }
+    /* 掉线重连：做成有容器的图标开关。原先是一枚裸图标、只靠变绿表示开启，
+       既不像按钮也读不出开关状态；现在与口选择器统一为 描边=关 / 浅填充=开 */
+    .term-bar .tb-icon-toggle {
+      width: 24px; height: 24px; justify-content: center; border-radius: 6px;
+      border: 1px solid var(--border); background: var(--panel);
+      transition: color .15s ease, border-color .15s ease, background-color .15s ease;
+    }
+    .term-bar .tb-icon-toggle:hover { border-color: var(--accent-line); background: var(--accent-soft); }
+    .term-bar .tb-icon-toggle.on { border-color: var(--accent-line); background: var(--accent-soft); }
+    .term-bar .tb-icon-toggle.busy .el-icon { animation: serial-reconnect-spin 1.1s linear infinite; }
+    .term-bar .tb-connect.el-button { min-height: 24px; padding: 0 10px; margin-left: 0; border-radius: 5px; font-size: 12px; }
+    .term-bar .tb-warn { color: var(--danger); font-size: 11px; white-space: nowrap; }
     .term-bar .spacer { flex: 1; }
     .term-content { flex: 1; overflow: auto; padding: 8px 12px 12px; font-family: var(--mono); font-size: 13px; line-height: 1.85; background: var(--term-bg); }
     .s-line { white-space: pre; word-break: normal; display: grid; grid-template-columns: max-content max-content; gap: 14px; width: max-content; min-width: 100%; padding: 0 2px; border-radius: 0; border-left: 0; }
@@ -66,7 +107,7 @@
     .term-latest:hover { color: var(--accent); border-color: var(--accent-line); }
     .send-bar { display: flex; gap: 8px; align-items: stretch; min-width: 0; }
     .send-bar .el-textarea, .send-bar .el-input { flex: 1; min-width: 0; }
-    .serial-compose { display: grid; grid-template-columns: minmax(0, 1fr) 160px; gap: 8px; padding-top: 1px; }
+    .serial-compose { display: grid; grid-template-columns: minmax(0, 1fr) 174px; gap: 8px; padding-top: 1px; }
     .send-input-stack { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
     .serial-send-input .el-textarea__inner {
       min-height: 54px !important; padding: 9px 11px; border-radius: 6px;
@@ -78,25 +119,36 @@
     .serial-send-input .el-textarea__inner:focus {
       background: var(--panel); box-shadow: 0 0 0 1px var(--accent) inset, 0 0 0 2px var(--accent-soft);
     }
-    .send-history-trigger.el-button,
-    .serial-send-button.el-button { height: 34px; margin: 0; border-radius: 5px; }
     .send-history-trigger.el-button {
-      width: 66px; min-width: 66px; padding: 0 8px; gap: 4px;
-      color: var(--text-soft); font-size: 11px;
+      width: 72px; min-width: 72px; height: 34px; margin: 0; padding: 0 8px; gap: 4px;
+      border-color: transparent; background: transparent; border-radius: 5px;
+      color: var(--text-soft); font-size: 11.5px;
     }
-    .send-history-trigger.el-button:hover { color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft); }
-    .serial-send-button.el-button { width: 88px; padding-inline: 12px; font-weight: 650; }
-    .send-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+    .send-history-trigger.el-button:hover { color: var(--accent); background: var(--accent-soft); }
+    /* 「发送」是这里唯一的实心主操作，「历史」降为幽灵按钮：
+       层级靠填充与留白区分，不再两个按钮同规格、只靠颜色不同 */
+    .serial-send-button.el-button {
+      width: 96px; height: 34px; margin: 0; padding-inline: 12px;
+      border-radius: 5px; font-weight: 500;
+    }
+    .send-actions { display: flex; flex-direction: column; align-items: flex-end; }
     .send-action-buttons {
-      width: 100%; height: 54px; display: grid; grid-template-columns: 66px 88px;
+      width: 100%; height: 54px; display: grid; grid-template-columns: 72px 96px;
       align-items: center; gap: 6px;
     }
     .send-action-buttons .send-history-trigger.el-button,
-    .send-action-buttons .serial-send-button.el-button {
-      width: 100%; min-width: 0; margin-left: 0;
+    .send-action-buttons .serial-send-button.el-button { width: 100%; min-width: 0; margin-left: 0; }
+    /* 键盘提示与收发统计合并为一行；统计走等宽字体，数字跳动时宽度稳定 */
+    .send-meta {
+      min-height: 18px; display: flex; align-items: center; gap: 10px;
+      color: var(--text-dim); font-size: 10.5px;
     }
-    .send-key-hint { min-height: 22px; display: flex; align-items: center; color: var(--text-dim); font-size: 10.5px; }
-    .send-actions .el-checkbox { height: 22px; margin: 0 4px 0 0; }
+    .send-key-hint { white-space: nowrap; }
+    .send-meta-stats {
+      margin-left: auto; display: inline-flex; align-items: center; gap: 6px;
+      font-family: var(--mono); white-space: nowrap;
+    }
+    .send-meta-sep { color: var(--border-2); }
     .serial-history-popper { padding: 0 !important; overflow: hidden; border-radius: 6px !important; }
     .send-history-head {
       min-height: 38px; display: grid; grid-template-columns: minmax(0, 1fr) max-content max-content;
@@ -123,35 +175,46 @@
       line-height: 1.45; text-overflow: ellipsis; white-space: nowrap;
     }
     .send-history-empty { padding: 28px 12px; color: var(--text-dim); font-size: 11.5px; text-align: center; }
-    .stat-row { display: flex; gap: 14px; align-items: center; font-size: 11.5px; color: var(--text-dim); font-family: var(--mono); padding: 2px 2px 0; }
-    .stat-row .sep { flex: 1; }
-    .serial-right .quick-head { min-height: 28px; margin-bottom: 10px; }
+    /* 首行高度 31px 且与终端工具栏同起点（内容区顶边 + 12px），使右栏首行的下边界
+       与 .term-bar 的下边框落在同一条水平线上（两列分隔线贯通）。
+       改这两项前先用截图量过：term-bar 为 73..103，右栏原先首行 73..99、分组块顶边框在 108。 */
+    .serial-right .quick-head { min-height: 31px; margin-bottom: 0; }
     .serial-right .quick-head .panel-title { display: flex; align-items: center; gap: 6px; margin: 0; }
+    .serial-right .quick-head-actions { display: flex; min-width: 0; align-items: center; gap: 2px; }
     .serial-right .quick-head .qh-count {
       min-width: 20px; margin: 0; padding: 1px 6px; border: 1px solid var(--accent-line);
       border-radius: 6px; background: transparent; font-variant-numeric: tabular-nums;
     }
-    .serial-right .quick-head .el-button { min-height: 28px; border-radius: 6px; font-weight: 600; }
+    .serial-right .quick-head .el-button { min-height: 26px; border-radius: 6px; }
+    /* 「循环发送」是模式开关而非主操作：默认低调，仅开启后转为可停止的告警态。
+       原先用 success 实心大圆角按钮，抢走了标题的视觉权重。 */
+    .serial-right .quick-head .quick-loop-button.el-button {
+      padding: 0 8px; gap: 4px; color: var(--text-soft); font-size: 11.5px; font-weight: 500;
+    }
+    .serial-right .quick-head .quick-loop-button.el-button:hover { color: var(--accent); background: var(--accent-soft); }
+    .serial-right .quick-head .quick-loop-button.el-button.on {
+      color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent);
+    }
     .serial-right .quick-groups {
       margin-bottom: 10px; overflow: hidden; border: 1px solid var(--border);
       border-radius: 6px; background: var(--panel-2);
     }
     .serial-right .qgroup-toggle {
-      width: 100%; min-height: 34px; display: grid;
-      grid-template-columns: max-content minmax(0, 1fr) max-content 16px;
-      align-items: center; gap: 7px; padding: 5px 7px 5px 9px; border: 0;
+      width: 100%; min-height: 30px; display: grid;
+      grid-template-columns: max-content minmax(0, 1fr) max-content 14px;
+      align-items: center; gap: 6px; padding: 4px 8px; border: 0;
       background: transparent; color: var(--text-soft); cursor: pointer; text-align: left;
     }
     .serial-right .qgroup-toggle:hover { background: var(--panel); }
     .serial-right .qgroup-toggle:focus-visible { outline: 2px solid var(--accent-line); outline-offset: -2px; }
-    .serial-right .qgroup-label { color: var(--text); font-size: 11.5px; font-weight: 650; }
+    .serial-right .qgroup-label { color: var(--text-dim); font-size: 11px; font-weight: 500; }
     .serial-right .qgroup-current {
-      min-width: 0; overflow: hidden; color: var(--accent); font-size: 11px;
+      min-width: 0; overflow: hidden; color: var(--accent); font-size: 11.5px; font-weight: 500;
       text-overflow: ellipsis; white-space: nowrap;
     }
+    /* 计数改为纯文本：原先的白底圆角块视觉上像输入框，容易被误认为可编辑 */
     .serial-right .qgroup-total {
-      min-width: 18px; padding: 0 5px; border-radius: 5px; background: var(--panel);
-      color: var(--text-dim); font-size: 10px; line-height: 18px; text-align: center;
+      color: var(--text-dim); font-size: 10.5px; white-space: nowrap;
       font-variant-numeric: tabular-nums;
     }
     .serial-right .qgroup-chevron {
@@ -160,53 +223,91 @@
     }
     .serial-right .quick-groups.collapsed .qgroup-chevron { transform: rotate(0); }
     .serial-right .quick-groups.collapsed .qgroup-toggle:hover .qgroup-chevron { color: var(--accent); }
-    .serial-right .qgroup-tabs {
-      display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px;
-      margin: 0; padding: 2px 6px 6px; border: 0; border-radius: 0; background: transparent;
+    /* 分组列表改用 flex 流式排布。原先固定 3 列 grid：只有 1 个分组时后两列全空，
+       分组名被 ellipsis 截断而计数徽标却很显眼，重命名图标也挤在一起。 */
+    .serial-right .qgroup-chips {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 5px;
+      margin: 0; padding: 0 8px 7px;
     }
-    .serial-right .qgtab {
-      min-width: 0; min-height: 28px; justify-content: center; gap: 4px; padding: 4px 6px;
-      border-color: transparent; border-radius: 5px; background: transparent;
+    .serial-right .qgchip {
+      min-width: 0; max-width: 100%; min-height: 26px; display: inline-flex;
+      align-items: center; gap: 5px; padding: 2px 7px; border: 1px solid var(--border);
+      border-radius: 7px; background: var(--panel); color: var(--text-soft);
+      font: inherit; font-size: 11.5px; line-height: 1.4; cursor: pointer;
+      transition: border-color .15s ease, background-color .15s ease, color .15s ease;
     }
-    .serial-right .qgtab:hover { border-color: var(--border); background: var(--panel); }
-    .serial-right .qgtab.active {
-      border-color: var(--accent-line); background: var(--panel); box-shadow: 0 1px 2px rgba(8,15,29,.08);
+    .serial-right .qgchip:hover { border-color: var(--border-2); color: var(--text); }
+    .serial-right .qgchip:focus-visible { outline: 2px solid var(--accent-line); outline-offset: -2px; }
+    .serial-right .qgchip.active { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent); }
+    .serial-right .qgchip .qgt-name { min-width: 0; max-width: 116px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .serial-right .qgchip .qgt-n {
+      flex-shrink: 0; min-width: 15px; padding: 0 4px; border-radius: 5px;
+      background: var(--panel-2); color: var(--text-dim); font-size: 10px; line-height: 16px;
+      text-align: center; font-variant-numeric: tabular-nums;
     }
-    .serial-right .qgtab .qgt-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .serial-right .qgtab .qgt-n { flex-shrink: 0; min-width: 16px; padding: 0 4px; border-radius: 5px; }
-    .serial-right .qgtab.active .qgt-n { background: var(--accent-soft); }
-    .serial-right .qgtab.add { width: 100%; padding: 4px; font-size: 16px; }
+    .serial-right .qgchip.active .qgt-n { background: var(--panel); color: var(--accent); }
+    .serial-right .qgchip .qgt-edit-ic { font-size: 12px; color: var(--text-dim); opacity: .7; }
+    .serial-right .qgchip .qgt-edit-ic:hover { color: var(--accent); opacity: 1; }
+    .serial-right .qgchip .qgt-edit {
+      width: 92px; padding: 2px 5px; border: 1px solid var(--accent-line); border-radius: 5px;
+      background: var(--panel); color: var(--text); font: inherit; font-size: 11.5px; outline: none;
+    }
+    .serial-right .qgchip.add { padding: 2px 6px; color: var(--text-dim); }
+    .serial-right .qgchip.add:hover { border-color: var(--accent-line); color: var(--accent); }
+    .serial-right .qgchip.add .el-icon { font-size: 13px; }
     .serial-right .quick-toolbar {
-      gap: 3px; margin-bottom: 10px; padding: 0 0 10px; border-bottom: 1px solid var(--border);
+      gap: 2px; margin-bottom: 8px; padding: 0 0 8px; border-bottom: 1px solid var(--border);
     }
-    .serial-right .quick-toolbar .el-button { min-height: 28px; margin-left: 0; border-radius: 5px; }
-    .serial-right .quick-toolbar > .el-button:first-child { font-weight: 600; }
-    .serial-right .qtool-icon.el-button { width: 28px; min-width: 28px; padding: 0; }
-    .serial-right .qfmt-button.el-button { padding-inline: 6px; }
+    .serial-right .quick-toolbar .el-button { min-height: 26px; margin-left: 0; border-radius: 5px; }
+    .serial-right .quick-toolbar .qtool-add.el-button { padding-inline: 8px; font-weight: 500; }
+    .serial-right .qtool-spacer { flex: 1; }
+    /* 工具按钮统一为 26×26 幽灵图标：原先「JSON 格式」带文字、其余为纯图标，
+       同一行两种规格显得杂乱；文字标签改由 tooltip 承担 */
+    .serial-right .qtool-icon.el-button { width: 26px; min-width: 26px; padding: 0; color: var(--text-dim); }
+    .serial-right .qtool-icon.el-button:hover { color: var(--accent); background: var(--accent-soft); }
     .serial-right .quick-list {
-      flex: 1; min-height: 0; gap: 8px; padding-right: 4px;
+      flex: 1; min-height: 0; gap: 6px; padding-right: 4px;
       scrollbar-color: var(--scroll) transparent;
     }
     .serial-right .quick-list::-webkit-scrollbar { width: 7px; }
     .serial-right .quick-list::-webkit-scrollbar-thumb { border-radius: 4px; background: var(--scroll); }
     .serial-right .qcard {
-      gap: 7px; padding: 9px; border-left-width: 3px; border-radius: 6px; background: var(--panel);
-      box-shadow: 0 1px 2px rgba(8,15,29,.04);
+      gap: 5px; padding: 7px 9px 8px; border-radius: 7px; background: var(--panel);
+      border-width: 1px; border-left-width: 3px; box-shadow: none;
       /* 注意：这里不要加 content-visibility:auto —— 虚拟列表需要实测 offsetHeight 来定位，
          而 content-visibility 会让视口外元素返回占位高度而非真实高度，破坏测量。 */
     }
-    .serial-right .qcard:hover { border-color: var(--border-2); box-shadow: 0 2px 6px rgba(8,15,29,.07); }
+    .serial-right .qcard:hover { border-color: var(--border-2); box-shadow: none; }
+    .serial-right .qcard:not(.on) { border-left-color: var(--border-2); }
     .serial-right .qcard.on { border-color: var(--border); border-left-color: var(--accent); background: var(--panel); }
-    .serial-right .qcard .qc-top { gap: 6px; }
+    .serial-right .qcard .qc-top { gap: 5px; min-height: 26px; }
     .serial-right .qcard .qc-name { min-width: 0; }
-    .serial-right .qcard .qc-name .el-input__wrapper { padding: 0 3px; }
-    .serial-right .qcard .qc-send { width: 46px; padding-inline: 8px; border-radius: 5px; }
-    .serial-right .qcard .qc-del { width: 26px; min-width: 26px; height: 26px; }
-    .serial-right .qcard .qc-content .el-textarea__inner { min-height: 30px !important; border-radius: 5px; line-height: 1.5; }
-    .serial-right .qcard .qc-bot { gap: 6px; min-height: 28px; }
-    .serial-right .qcard .qc-bot .lbl { margin-left: auto; }
-    .serial-right .qcard .qc-int { width: 66px; }
-    .serial-right .qcard .qc-unit { width: 68px; }
+    .serial-right .qcard .qc-name .el-input__wrapper { padding: 0 2px; }
+    .serial-right .qcard .qc-name .el-input__inner { font-size: 12px; font-weight: 500; }
+    /* 发送：卡片内主操作，改用强调色浅填充，替代原先与整体配色不协调的实心主色块 */
+    .serial-right .qcard .qc-send.el-button {
+      width: 44px; min-height: 24px; padding: 0 8px; border-color: transparent;
+      border-radius: 5px; color: var(--accent); background: var(--accent-soft);
+      font-size: 11.5px; font-weight: 500;
+    }
+    .serial-right .qcard .qc-send.el-button:hover { background: var(--accent-line); }
+    .serial-right .qcard .qc-send.el-button.is-disabled {
+      color: var(--text-dim); background: var(--panel-2); border-color: var(--border);
+    }
+    .serial-right .qcard .qc-del.el-button { width: 24px; min-width: 24px; padding: 0; color: var(--text-dim); }
+    .serial-right .qcard .qc-del.el-button:hover {
+      color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent);
+    }
+    /* 内容框高度由 rows 显式决定（未聚焦 1 行 / 聚焦展开 4 行），禁用 autosize 与手动拖拽：
+       autosize 会在右栏收折过渡期间按 36px 宽度测量，把单行指令算成 4 行高度。 */
+    .serial-right .qcard .qc-content .el-textarea__inner {
+      min-height: 0 !important; padding: 4px 8px; border-radius: 5px; resize: none;
+      font-family: var(--mono); font-size: 12px; line-height: 1.45;
+    }
+    .serial-right .qcard .qc-bot { gap: 5px; min-height: 24px; }
+    .serial-right .qcard .qc-bot .lbl { margin-left: auto; font-size: 11px; }
+    .serial-right .qcard .qc-int { width: 56px; }
+    .serial-right .qcard .qc-unit { width: 70px; }
 
     /* ── 虚拟列表（VirtualList.vue）──────────────────────────────
        只渲染视口内的卡片，其余用占位高度撑起滚动条。
