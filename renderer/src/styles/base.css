@@ -241,7 +241,8 @@ html {
       background: var(--panel-2); border: 1px solid var(--border);
       padding: 1px 6px; border-radius: 5px; color: var(--accent);
     }
-    #app { flex: 1; width: 100%; display: flex; min-height: 0; }
+    /* 纵向布局：顶部自定义标题栏（.titlebar） + 下方 .app-body（左导航 + 主内容） */
+    #app { flex: 1; width: 100%; display: flex; flex-direction: column; min-height: 0; }
 
 
 /* ── 全局弹出层：消息、确认框与对话框 ───────────────────────────── */

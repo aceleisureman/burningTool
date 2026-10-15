@@ -1,19 +1,40 @@
 <template>
+    <!-- ════ 自定义标题栏（frameless 窗口拖拽区 + 窗口控制按钮）════ -->
+    <header class="titlebar" :class="{ 'is-mac': isMac }">
+      <div class="tb-logo">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <rect x="4" y="4" width="16" height="16" rx="2.5"/>
+          <line x1="9" y1="1.5" x2="9" y2="4"/><line x1="15" y1="1.5" x2="15" y2="4"/>
+          <line x1="9" y1="20" x2="9" y2="22.5"/><line x1="15" y1="20" x2="15" y2="22.5"/>
+          <line x1="1.5" y1="9" x2="4" y2="9"/><line x1="1.5" y1="15" x2="4" y2="15"/>
+          <line x1="20" y1="9" x2="22.5" y2="9"/><line x1="20" y1="15" x2="22.5" y2="15"/>
+        </svg>
+      </div>
+      <span class="tb-name">STM32 工具箱</span>
+      <span class="tb-ver">v{{ appVersion }}</span>
+      <span class="tb-spacer"></span>
+      <div class="tb-win" v-if="!isMac">
+        <button class="tb-wbtn" title="最小化" @click="winMinimize">
+          <svg width="10" height="10" viewBox="0 0 10 10"><line x1="1" y1="5" x2="9" y2="5" stroke="currentColor" stroke-width="1"/></svg>
+        </button>
+        <button class="tb-wbtn" :title="winMaximized ? '向下还原' : '最大化'" @click="winToggleMaximize">
+          <svg v-if="winMaximized" width="10" height="10" viewBox="0 0 10 10">
+            <path d="M2.75 2.75V0.75h6.5v6.5h-2" fill="none" stroke="currentColor" stroke-width="1"/>
+            <rect x="0.75" y="2.75" width="6.5" height="6.5" fill="none" stroke="currentColor" stroke-width="1"/>
+          </svg>
+          <svg v-else width="10" height="10" viewBox="0 0 10 10">
+            <rect x="0.75" y="0.75" width="8.5" height="8.5" fill="none" stroke="currentColor" stroke-width="1"/>
+          </svg>
+        </button>
+        <button class="tb-wbtn tb-wclose" title="关闭" @click="winClose">
+          <svg width="10" height="10" viewBox="0 0 10 10"><path d="M1 1l8 8M9 1L1 9" stroke="currentColor" stroke-width="1.1"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="app-body">
     <!-- ════ 左侧工具导航 ════ -->
     <nav class="app-nav" :class="{ collapsed: navCollapsed }">
-      <div class="nav-brand">
-        <div class="logo">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-            <rect x="4" y="4" width="16" height="16" rx="2.5"/>
-            <line x1="9" y1="1.5" x2="9" y2="4"/><line x1="15" y1="1.5" x2="15" y2="4"/>
-            <line x1="9" y1="20" x2="9" y2="22.5"/><line x1="15" y1="20" x2="15" y2="22.5"/>
-            <line x1="1.5" y1="9" x2="4" y2="9"/><line x1="1.5" y1="15" x2="4" y2="15"/>
-            <line x1="20" y1="9" x2="22.5" y2="9"/><line x1="20" y1="15" x2="22.5" y2="15"/>
-          </svg>
-        </div>
-        <div class="bt"><span class="t1">STM32 工具箱</span><span class="t2">toolbox</span></div>
-      </div>
-
       <div class="nav-section">工具</div>
       <button class="nav-item" :class="{ active: tool === 'flash' }" @click="tool = 'flash'" title="STM32 固件烧录">
         <el-icon><Cpu /></el-icon><span class="label">固件烧录</span>
@@ -186,6 +207,7 @@
         <SettingsView v-else />
       </KeepAlive>
     </div>
+    </div><!-- /app-body -->
 
     <!-- 串口选择对话框 -->
     <el-dialog v-model="portChooser.visible" title="选择串口设备" width="480px" align-center @close="cancelPortChoose">
@@ -294,6 +316,14 @@ export default {
     function toggleNav() { navCollapsed.value = !navCollapsed.value; try { localStorage.setItem('nav-collapsed', navCollapsed.value ? '1' : '0'); } catch (_e) {} }
     const appShell = { tool, prevTool };
 
+    /* ════ 自定义标题栏：frameless 窗口控制 ════ */
+    // macOS 保留原生红绿灯（hiddenInset），标题栏只留拖拽区；其余平台用自绘按钮。
+    const isMac = !!(window.api && window.api.platform === 'darwin');
+    const winMaximized = ref(false);
+    const winMinimize = () => { try { window.api.winMinimize(); } catch (_e) {} };
+    const winToggleMaximize = () => { try { window.api.winToggleMaximize(); } catch (_e) {} };
+    const winClose = () => { try { window.api.winClose(); } catch (_e) {} };
+
     /* ════ 各域组合式（依赖显式注入：日志/配置/工具切换为跨域共享） ════ */
     const theme = useTheme();
     const log = useLog();
@@ -319,6 +349,13 @@ export default {
 
     onMounted(() => {
       try { navCollapsed.value = localStorage.getItem('nav-collapsed') === '1'; } catch (_e) {}
+      // 标题栏：同步一次当前最大化状态，并订阅后续变化（最大化/还原切换按钮图标）
+      try {
+        if (window.api && window.api.winIsMaximized) {
+          window.api.winIsMaximized().then((v) => { winMaximized.value = !!v; }).catch(() => {});
+          window.api.onWinMaxState((v) => { winMaximized.value = !!v; });
+        }
+      } catch (_e) {}
       // 启动性能探针：把渲染端的挂载/首屏时刻回报给主进程，统一成一根时间轴。
       // 未开启 MCU_STARTUP_PROFILE 时主进程侧 no-op，这里几乎无开销。
       const t0 = performance.now();
@@ -349,6 +386,7 @@ export default {
 
     const appContext = {
       tool, navCollapsed, toggleNav, aboutVisible, appVersion,
+      isMac, winMaximized, winMinimize, winToggleMaximize, winClose,
       ...theme, ...log, ...glyph, ...crcTool, ...settings, ...flash, ...stc51Tool, ...esp32Tool, ...hardware, ...ramlog, ...firmware, ...serial, ...mqtt, ...update, ...memory,
       FolderOpened, VideoPlay, Upload, CaretRight, Delete, Download, MagicStick, CopyDocument,
       Connection, SwitchButton, Promotion, Plus, Close, RefreshRight, VideoPause, Cpu,

@@ -1,13 +1,46 @@
+    /* ── 自定义标题栏（frameless 窗口）──────────────────
+       整条都是拖拽区；窗口按钮与品牌位声明 no-drag。
+       双击标题栏触发的最大化由系统默认行为处理，无需 JS。 */
+    .titlebar {
+      -webkit-app-region: drag;
+      flex: 0 0 40px; display: flex; align-items: center; gap: 9px;
+      padding-left: 12px; background: var(--nav-bg);
+      border-bottom: 1px solid var(--border);
+    }
+    .titlebar .tb-logo {
+      width: 22px; height: 22px; border-radius: 6px; color: #fff; flex-shrink: 0;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 2px 8px var(--glow);
+    }
+    .titlebar .tb-name { font-size: 12.5px; font-weight: 700; letter-spacing: .4px; color: var(--text); }
+    .titlebar .tb-ver { font-size: 10.5px; color: var(--text-dim); font-family: var(--mono); }
+    .titlebar .tb-spacer { flex: 1; }
+    .titlebar .tb-win {
+      -webkit-app-region: no-drag; display: flex; align-self: stretch; flex-shrink: 0;
+    }
+    .tb-wbtn {
+      width: 46px; display: flex; align-items: center; justify-content: center;
+      color: var(--text-soft); background: transparent; border: none; cursor: pointer;
+      transition: background .12s, color .12s;
+    }
+    .tb-wbtn:hover { background: var(--accent-soft); color: var(--accent); }
+    .tb-wbtn.tb-wclose:hover { background: #e81123; color: #fff; }
+    /* macOS：原生红绿灯叠在左上，隐藏自绘按钮并留出灯位 */
+    .titlebar.is-mac { padding-left: 84px; }
+    .titlebar.is-mac .tb-win { display: none; }
+
+    /* 标题栏之下的主体：左导航 + 主内容（原 #app 的行布局移到这里） */
+    .app-body { flex: 1; display: flex; min-height: 0; }
+
     /* ── 左侧工具导航栏 ── */
     .app-nav {
       width: var(--nav-w); flex-shrink: 0; background: var(--nav-bg);
       border-right: 1px solid var(--border);
-      display: flex; flex-direction: column; padding: 10px 10px 8px;
+      display: flex; flex-direction: column; padding: 12px 10px 8px;
       -webkit-app-region: drag; transition: width .2s ease, padding .2s ease;
     }
-    .app-nav.collapsed { width: 72px; padding: 12px 10px 14px; }
-    .app-nav.collapsed .nav-brand { justify-content: center; padding: 8px 0 18px; }
-    .app-nav.collapsed .nav-brand .bt { display: none; }
+    .app-nav.collapsed { width: 72px; padding: 14px 10px 14px; }
     .app-nav.collapsed .nav-section { display: none; }
     .app-nav.collapsed .nav-item { justify-content: center; padding: 0; gap: 0; height: 48px; margin-bottom: 16px; }
     .app-nav.collapsed .nav-item .el-icon { font-size: 20px; }
@@ -17,20 +50,7 @@
     .app-nav.collapsed .nav-foot { flex-direction: column; gap: 20px; padding: 18px 0 8px; }
     .app-nav.collapsed .nav-foot .nf-btn { height: 48px; }
     .app-nav.collapsed .nav-foot .nf-btn .el-icon { font-size: 19px; }
-    .nav-brand {
-      display: flex; align-items: center; gap: 10px; padding: 8px 8px 14px;
-      -webkit-app-region: drag;
-    }
-    .nav-brand .logo {
-      width: 34px; height: 34px; border-radius: 9px; color: #fff;
-      background: linear-gradient(135deg, var(--accent), var(--accent-2));
-      display: flex; align-items: center; justify-content: center; flex-shrink: 0;
-      box-shadow: 0 4px 12px var(--glow);
-    }
-    .nav-brand .bt { display: flex; flex-direction: column; line-height: 1.25; }
-    .nav-brand .bt .t1 { font-size: 14px; font-weight: 700; letter-spacing: .5px; }
-    .nav-brand .bt .t2 { font-size: 10.5px; color: var(--text-dim); font-family: var(--mono); }
-    .nav-section { font-size: 11px; color: var(--text-dim); padding: 8px 10px 5px; letter-spacing: .5px; }
+    .nav-section { font-size: 11px; color: var(--text-dim); padding: 6px 10px 5px; letter-spacing: .5px; }
     .nav-item {
       -webkit-app-region: no-drag; position: relative;
       display: flex; align-items: center; gap: 10px; width: 100%;

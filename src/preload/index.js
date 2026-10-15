@@ -80,5 +80,12 @@ contextBridge.exposeInMainWorld('api', {
   startupProfile:   () => ipcRenderer.invoke('startup-profile'),
   // ── 内存监控（设置页采样用）──
   memoryStats:      () => ipcRenderer.invoke('app-memory-stats'),   // 各进程内存快照
-  memoryGc:         () => ipcRenderer.invoke('app-memory-gc')       // 触发主进程 GC
+  memoryGc:         () => ipcRenderer.invoke('app-memory-gc'),       // 触发主进程 GC
+  // ── 自定义标题栏（frameless 窗口控制；macOS 不用自绘按钮，由原生红绿灯接管）──
+  winMinimize:       () => ipcRenderer.invoke('win-minimize'),
+  winToggleMaximize: () => ipcRenderer.invoke('win-toggle-maximize'),
+  winClose:          () => ipcRenderer.invoke('win-close'),
+  winIsMaximized:    () => ipcRenderer.invoke('win-is-maximized'),
+  onWinMaxState:     (cb) => onRendererEvent('win-max-state', cb),   // 最大化状态变化
+  platform:          process.platform
 });

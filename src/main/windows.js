@@ -150,6 +150,26 @@ function debounce(fn, ms = 300) {
 }
 
 /* ── 窗口 ─────────────────────────────────────────────── */
+// 自定义标题栏：渲染层窗口按钮的最小化 / 最大化还原 / 关闭 IPC + 最大化状态推送。
+// 「关闭」走 close 事件，与原生标题栏一致：未置 app.isQuitting 时会被拦截成隐藏到托盘。
+// 窗口可能销毁重建（托盘「显示主窗口」路径），所以先摘旧 handler 再注册，closed 时清理。
+function setupWindowControls(win) {
+  const CHANNELS = ['win-minimize', 'win-toggle-maximize', 'win-close', 'win-is-maximized'];
+  CHANNELS.forEach((ch) => ipcMain.removeHandler(ch));
+  ipcMain.handle('win-minimize', () => { try { win.minimize(); } catch {} });
+  ipcMain.handle('win-toggle-maximize', () => {
+    try { if (win.isMaximized()) win.unmaximize(); else win.maximize(); } catch {}
+  });
+  ipcMain.handle('win-close', () => { try { win.close(); } catch {} });
+  ipcMain.handle('win-is-maximized', () => { try { return win.isMaximized(); } catch {} return false; });
+  const sendMaxState = (v) => {
+    try { if (!win.isDestroyed()) win.webContents.send('win-max-state', v); } catch {}
+  };
+  win.on('maximize', () => sendMaxState(true));
+  win.on('unmaximize', () => sendMaxState(false));
+  win.once('closed', () => CHANNELS.forEach((ch) => ipcMain.removeHandler(ch)));
+}
+
 // 串口选择回调：渲染端 navigator.serial.requestPort() 会触发 select-serial-port，
 // 主进程把可用端口列表发给渲染端选，选完再通过 callback 返回。
 let serialSelectCallback = null;
@@ -239,6 +259,12 @@ function createWindow() {
     title: 'STM32 工具箱',
     icon: APP_ICON,
     backgroundColor: '#eef2f7',
+    // 自定义标题栏：Windows/Linux 完全去框（渲染层画标题栏 + 窗口控制按钮，
+    // 拖拽区由 .titlebar / .app-nav / .pane-top 的 -webkit-app-region: drag 提供，
+    // 双击标题栏最大化由系统默认行为处理）；macOS 用 hiddenInset 保留原生红绿灯。
+    ...(process.platform === 'darwin'
+      ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 14, y: 13 } }
+      : { frame: false }),
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload', 'index.js'),
       contextIsolation: true,
@@ -247,6 +273,7 @@ function createWindow() {
   });
   mainWindow.setMenuBarVisibility(false);
   setupSerial(mainWindow);
+  setupWindowControls(mainWindow);
 
   // 主窗口只允许停留在打包页面或当前 Vite 开发源，禁止弹出新窗口。
   const guardNavigation = (event, targetUrl) => {
