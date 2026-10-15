@@ -8,7 +8,10 @@ const view = fs.readFileSync(path.join(root, 'renderer', 'src', 'views', 'Serial
 const composable = fs.readFileSync(path.join(root, 'renderer', 'src', 'composables', 'useSerial.js'), 'utf8');
 
 test('quick command toolbar exposes JSON format documentation', () => {
-  assert.match(view, />JSON 格式</);
+  // 工具栏按钮由「图标 + 文字」压缩为纯图标（文字改由 tooltip / aria-label 承担），
+  // 故断言入口的可访问名称与点击处理，而不再匹配可见文字节点。
+  assert.match(view, /aria-label="JSON 格式说明"/);
+  assert.match(view, /@click="openQuickFormat"/);
   assert.match(view, /title="快捷指令 JSON 格式"/);
   for (const tab of ['参数说明', 'JSON 示例', 'AI 提示词']) assert.match(view, new RegExp(tab));
   assert.match(view, /copyQuickCommandExample/);
