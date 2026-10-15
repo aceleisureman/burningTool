@@ -46,6 +46,15 @@ html {
   --el-color-info-light-7: color-mix(in srgb, var(--accent) 30%, #fff);
   --el-color-info-light-8: color-mix(in srgb, var(--accent) 22%, #fff);
   --el-color-info-light-9: color-mix(in srgb, var(--accent) 12%, #fff);
+  /* primary 的派生色此前整体缺失。Element Plus 的禁用 / 悬停 / plain 主按钮分别取
+     -light-5 / -light-3 / -light-9，未定义时会回落到编译期默认的蓝色系，
+     于是「发送」这类主按钮在禁用态呈淡蓝、与全站强调色不符。此处补齐。 */
+  --el-color-primary-light-3: color-mix(in srgb, var(--el-color-primary) 70%, #fff);
+  --el-color-primary-light-5: color-mix(in srgb, var(--el-color-primary) 50%, #fff);
+  --el-color-primary-light-7: color-mix(in srgb, var(--el-color-primary) 30%, #fff);
+  --el-color-primary-light-8: color-mix(in srgb, var(--el-color-primary) 22%, #fff);
+  --el-color-primary-light-9: color-mix(in srgb, var(--el-color-primary) 12%, #fff);
+  --el-color-primary-dark-2: color-mix(in srgb, var(--el-color-primary) 80%, #000);
 }
 
 /* ── Element Plus 暗色基础变量（具体色板由 data-theme 覆盖）── */
